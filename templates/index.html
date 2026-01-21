@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Isaac Sim HMI Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <!-- Socket.IO -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1>🤖 Isaac Sim HMI Dashboard</h1>
+                <div class="connection-status" id="connectionStatus">
+                    <span class="status-dot disconnected"></span>
+                    <span class="status-text">Disconnected</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Robot Selection Panel -->
+            <section class="panel robot-selection-panel">
+                <div class="panel-header">
+                    <h2>Robot Selection</h2>
+                    <button class="btn btn-secondary" id="scanRobotsBtn" title="Scan for robots">
+                        🔍 Scan
+                    </button>
+                </div>
+                <div class="panel-content">
+                    <div class="robot-list" id="robotList">
+                        <!-- Robot items will be added dynamically -->
+                    </div>
+                    <div class="add-robot-form">
+                        <input type="text" id="newRobotNamespace" placeholder="Enter robot namespace..." />
+                        <button class="btn btn-primary" id="addRobotBtn">+ Add Robot</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Control Panels Container -->
+            <div class="control-panels" id="controlPanels">
+                <!-- Joint Control Panel -->
+                <section class="panel joint-control-panel">
+                    <div class="panel-header">
+                        <h2>Joint Control</h2>
+                        <span class="selected-robot" id="selectedRobotJoint">No robot selected</span>
+                    </div>
+                    <div class="panel-content">
+                        <div class="joint-sliders" id="jointSliders">
+                            <!-- 6 joint sliders -->
+                            <div class="joint-slider-group" data-joint="0">
+                                <label>Joint 1</label>
+                                <div class="slider-container">
+                                    <button class="btn-offset" data-offset="-0.1">-</button>
+                                    <input type="range" class="joint-slider" min="-3.14159" max="3.14159" step="0.01" value="0" />
+                                    <button class="btn-offset" data-offset="0.1">+</button>
+                                </div>
+                                <input type="number" class="joint-value" step="0.01" value="0" /> rad
+                            </div>
+                            <div class="joint-slider-group" data-joint="1">
+                                <label>Joint 2</label>
+                                <div class="slider-container">
+                                    <button class="btn-offset" data-offset="-0.1">-</button>
+                                    <input type="range" class="joint-slider" min="-3.14159" max="3.14159" step="0.01" value="0" />
+                                    <button class="btn-offset" data-offset="0.1">+</button>
+                                </div>
+                                <input type="number" class="joint-value" step="0.01" value="0" /> rad
+                            </div>
+                            <div class="joint-slider-group" data-joint="2">
+                                <label>Joint 3</label>
+                                <div class="slider-container">
+                                    <button class="btn-offset" data-offset="-0.1">-</button>
+                                    <input type="range" class="joint-slider" min="-3.14159" max="3.14159" step="0.01" value="0" />
+                                    <button class="btn-offset" data-offset="0.1">+</button>
+                                </div>
+                                <input type="number" class="joint-value" step="0.01" value="0" /> rad
+                            </div>
+                            <div class="joint-slider-group" data-joint="3">
+                                <label>Joint 4</label>
+                                <div class="slider-container">
+                                    <button class="btn-offset" data-offset="-0.1">-</button>
+                                    <input type="range" class="joint-slider" min="-3.14159" max="3.14159" step="0.01" value="0" />
+                                    <button class="btn-offset" data-offset="0.1">+</button>
+                                </div>
+                                <input type="number" class="joint-value" step="0.01" value="0" /> rad
+                            </div>
+                            <div class="joint-slider-group" data-joint="4">
+                                <label>Joint 5</label>
+                                <div class="slider-container">
+                                    <button class="btn-offset" data-offset="-0.1">-</button>
+                                    <input type="range" class="joint-slider" min="-3.14159" max="3.14159" step="0.01" value="0" />
+                                    <button class="btn-offset" data-offset="0.1">+</button>
+                                </div>
+                                <input type="number" class="joint-value" step="0.01" value="0" /> rad
+                            </div>
+                            <div class="joint-slider-group" data-joint="5">
+                                <label>Joint 6</label>
+                                <div class="slider-container">
+                                    <button class="btn-offset" data-offset="-0.1">-</button>
+                                    <input type="range" class="joint-slider" min="-3.14159" max="3.14159" step="0.01" value="0" />
+                                    <button class="btn-offset" data-offset="0.1">+</button>
+                                </div>
+                                <input type="number" class="joint-value" step="0.01" value="0" /> rad
+                            </div>
+                        </div>
+                        <div class="control-buttons">
+                            <button class="btn btn-primary" id="sendJointCmd">Send Joint Command</button>
+                            <button class="btn btn-secondary" id="syncFromFeedback">Sync from Feedback</button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Cartesian Control Panel -->
+                <section class="panel cartesian-control-panel">
+                    <div class="panel-header">
+                        <h2>Cartesian Control</h2>
+                        <span class="selected-robot" id="selectedRobotCartesian">No robot selected</span>
+                    </div>
+                    <div class="panel-content">
+                        <div class="cartesian-inputs">
+                            <!-- Position -->
+                            <div class="input-group">
+                                <h3>Position (meters)</h3>
+                                <div class="cartesian-row">
+                                    <div class="cartesian-field">
+                                        <label>X</label>
+                                        <div class="input-with-offset">
+                                            <button class="btn-offset" data-target="posX" data-offset="-0.01">-</button>
+                                            <input type="number" id="posX" step="0.001" value="0" />
+                                            <button class="btn-offset" data-target="posX" data-offset="0.01">+</button>
+                                        </div>
+                                    </div>
+                                    <div class="cartesian-field">
+                                        <label>Y</label>
+                                        <div class="input-with-offset">
+                                            <button class="btn-offset" data-target="posY" data-offset="-0.01">-</button>
+                                            <input type="number" id="posY" step="0.001" value="0" />
+                                            <button class="btn-offset" data-target="posY" data-offset="0.01">+</button>
+                                        </div>
+                                    </div>
+                                    <div class="cartesian-field">
+                                        <label>Z</label>
+                                        <div class="input-with-offset">
+                                            <button class="btn-offset" data-target="posZ" data-offset="-0.01">-</button>
+                                            <input type="number" id="posZ" step="0.001" value="0" />
+                                            <button class="btn-offset" data-target="posZ" data-offset="0.01">+</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Orientation -->
+                            <div class="input-group">
+                                <h3>Orientation (quaternion)</h3>
+                                <div class="cartesian-row">
+                                    <div class="cartesian-field">
+                                        <label>W</label>
+                                        <input type="number" id="orientW" step="0.001" value="1" />
+                                    </div>
+                                    <div class="cartesian-field">
+                                        <label>X</label>
+                                        <input type="number" id="orientX" step="0.001" value="0" />
+                                    </div>
+                                    <div class="cartesian-field">
+                                        <label>Y</label>
+                                        <input type="number" id="orientY" step="0.001" value="0" />
+                                    </div>
+                                    <div class="cartesian-field">
+                                        <label>Z</label>
+                                        <input type="number" id="orientZ" step="0.001" value="0" />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="control-buttons">
+                            <button class="btn btn-primary" id="sendCartesianCmd">Send Cartesian Command</button>
+                            <button class="btn btn-secondary" id="syncCartesianFromFeedback">Sync from Feedback</button>
+                        </div>
+                        
+                        <!-- Quick offset buttons -->
+                        <div class="quick-offsets">
+                            <h4>Quick Position Offsets</h4>
+                            <div class="offset-grid">
+                                <button class="btn btn-small" data-axis="x" data-delta="-0.05">X-</button>
+                                <button class="btn btn-small" data-axis="x" data-delta="0.05">X+</button>
+                                <button class="btn btn-small" data-axis="y" data-delta="-0.05">Y-</button>
+                                <button class="btn btn-small" data-axis="y" data-delta="0.05">Y+</button>
+                                <button class="btn btn-small" data-axis="z" data-delta="-0.05">Z-</button>
+                                <button class="btn btn-small" data-axis="z" data-delta="0.05">Z+</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Live Feedback Panel -->
+            <section class="panel feedback-panel">
+                <div class="panel-header">
+                    <h2>Live Feedback</h2>
+                    <div class="feedback-controls">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="autoRefreshToggle" checked />
+                            <span class="slider"></span>
+                            <span class="toggle-label">Auto-refresh</span>
+                        </label>
+                        <span class="update-rate" id="updateRate">-- Hz</span>
+                    </div>
+                </div>
+                <div class="panel-content">
+                    <div class="feedback-grid">
+                        <!-- Joint States Feedback -->
+                        <div class="feedback-section">
+                            <h3>Joint States</h3>
+                            <div class="feedback-table" id="jointStatesFeedback">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Joint</th>
+                                            <th>Position (rad)</th>
+                                            <th>Velocity</th>
+                                            <th>Effort</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="jointStatesBody">
+                                        <tr><td colspan="4" class="no-data">No data available</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        
+                        <!-- Cartesian Pose Feedback -->
+                        <div class="feedback-section">
+                            <h3>Cartesian Pose</h3>
+                            <div class="feedback-cards">
+                                <div class="feedback-card">
+                                    <h4>Position</h4>
+                                    <div class="feedback-values">
+                                        <div class="feedback-value">
+                                            <span class="label">X:</span>
+                                            <span class="value" id="fbPosX">--</span>
+                                            <span class="unit">m</span>
+                                        </div>
+                                        <div class="feedback-value">
+                                            <span class="label">Y:</span>
+                                            <span class="value" id="fbPosY">--</span>
+                                            <span class="unit">m</span>
+                                        </div>
+                                        <div class="feedback-value">
+                                            <span class="label">Z:</span>
+                                            <span class="value" id="fbPosZ">--</span>
+                                            <span class="unit">m</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="feedback-card">
+                                    <h4>Orientation</h4>
+                                    <div class="feedback-values">
+                                        <div class="feedback-value">
+                                            <span class="label">W:</span>
+                                            <span class="value" id="fbOrientW">--</span>
+                                        </div>
+                                        <div class="feedback-value">
+                                            <span class="label">X:</span>
+                                            <span class="value" id="fbOrientX">--</span>
+                                        </div>
+                                        <div class="feedback-value">
+                                            <span class="label">Y:</span>
+                                            <span class="value" id="fbOrientY">--</span>
+                                        </div>
+                                        <div class="feedback-value">
+                                            <span class="label">Z:</span>
+                                            <span class="value" id="fbOrientZ">--</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="timestamp" id="poseTimestamp">Last update: --</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Notifications -->
+        <div class="notifications" id="notifications"></div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>Isaac Sim HMI Dashboard | ROS2 Interface</p>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='scripts.js') }}"></script>
+</body>
+</html>
