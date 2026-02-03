@@ -414,6 +414,133 @@ function updateJointSliderLabels(jointNames) {
         }
     });
 }
+// Home button handler
+const homeButton = document.getElementById('homeJointsBtn');
+homeButton.addEventListener('click', () => {
+    // Select all joint sliders and number inputs
+    const jointGroups = document.querySelectorAll('.joint-slider-group');
+
+    jointGroups.forEach(group => {
+        const slider = group.querySelector('.joint-slider');
+        const numberInput = group.querySelector('.joint-value');
+
+        // Set values to zero
+        slider.value = 0;
+        numberInput.value = 0;
+    });
+
+    // Trigger the existing sendJointCmd functionality
+    document.getElementById('sendJointCmd').click();
+});
+
+const paperRollButton = document.getElementById('PaperRollBtn');
+paperRollButton.addEventListener('click', () => {
+    // Select all joint sliders and number inputs
+    const jointGroups = document.querySelectorAll('.joint-slider-group');
+    
+    jointGroups.forEach((group, index) => {
+        const slider = group.querySelector('.joint-slider');
+        const numberInput = group.querySelector('.joint-value');
+        if(index === 1){
+            slider.value = 0.30;
+            numberInput.value = 0.30;
+        }
+        else if(index === 2){
+            slider.value = -0.5;
+            numberInput.value = -0.5;
+        } else if(index === 4){
+            slider.value = -0.5;
+            numberInput.value = -0.5;
+        } else {
+            // Set other joints to zero
+            slider.value = 0;
+            numberInput.value = 0;
+        }
+    });
+    
+    // Trigger the existing sendJointCmd functionality
+    document.getElementById('sendJointCmd').click();
+});
+
+/*const MoveRollToConveyor = document.getElementById('MoveRollToConveyorBtn');
+MoveRollToConveyor.addEventListener('click', () => {
+    // Select all joint sliders and number inputs
+    const jointGroups = document.querySelectorAll('.joint-slider-group');
+    
+    jointGroups.forEach((group, index) => {
+        const slider = group.querySelector('.joint-slider');
+        const numberInput = group.querySelector('.joint-value');
+        if(index === 1){
+            slider.value = -0.5;
+            numberInput.value = -0.5;
+        }
+        else if(index === 2){
+            slider.value = -0.25;
+            numberInput.value = -0.25;
+        } else if(index === 4){
+            slider.value = -0.5;
+            numberInput.value = -0.5;
+        } else {
+            // Set other joints to zero
+            slider.value = 0;
+            numberInput.value = 0;
+        }
+    });
+    
+    // Trigger the existing sendJointCmd functionality
+    document.getElementById('sendJointCmd').click();
+});*/
+
+const MoveRollToConveyor = document.getElementById('MoveRollToConveyorBtn');
+
+MoveRollToConveyor.addEventListener('click', () => {
+    const jointGroups = document.querySelectorAll('.joint-slider-group');
+
+    // Build target values per joint
+    const targets = [];
+
+    jointGroups.forEach((group, index) => {
+        if (index === 1) targets[index] = -0.5;
+        else if (index === 2) targets[index] = 0.5;
+        else if (index === 4) targets[index] = 0.5;
+        else targets[index] = 0;
+    });
+    const speed = 0.01; // radians per ms
+    const duration = 20000; // ms (tweak for speed)
+    const startTime = performance.now();
+
+    // Capture starting values
+    const starts = Array.from(jointGroups, group =>
+        parseFloat(group.querySelector('.joint-slider').value)
+    );
+
+    function animate(time) {
+        const elapsed = time - startTime;
+        const t = Math.min(elapsed / duration, 1); // 0 → 1
+
+        jointGroups.forEach((group, index) => {
+            const slider = group.querySelector('.joint-slider');
+            const numberInput = group.querySelector('.joint-value');
+
+            // Linear interpolation (lerp)
+            const value =
+                starts[index] + (targets[index] - starts[index]) * t;
+
+            slider.value = value;
+            numberInput.value = value;
+        });
+
+        // Send joint command continuously while animating
+        document.getElementById('sendJointCmd').click();
+
+        if (t < 1) {
+            requestAnimationFrame(animate);
+        }
+    }
+
+    requestAnimationFrame(animate);
+});
+
 
 function getJointPositions() {
     const positions = [];
