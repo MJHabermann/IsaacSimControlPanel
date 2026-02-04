@@ -13,6 +13,11 @@ const CONFIG = {
     POSITION_OFFSET_STEP: 0.01,  // meters
 };
 
+const MOTION_CONFIG = {
+    SEND_RATE_HZ: 20,      // how often commands are sent
+    DEFAULT_DURATION: 25.0 // seconds to reach target
+};
+
 // ============== State Management ==============
 const state = {
     socket: null,
@@ -462,38 +467,72 @@ paperRollButton.addEventListener('click', () => {
     document.getElementById('sendJointCmd').click();
 });
 
-/*const MoveRollToConveyor = document.getElementById('MoveRollToConveyorBtn');
-MoveRollToConveyor.addEventListener('click', () => {
-    // Select all joint sliders and number inputs
-    const jointGroups = document.querySelectorAll('.joint-slider-group');
-    
-    jointGroups.forEach((group, index) => {
-        const slider = group.querySelector('.joint-slider');
-        const numberInput = group.querySelector('.joint-value');
-        if(index === 1){
-            slider.value = -0.5;
-            numberInput.value = -0.5;
-        }
-        else if(index === 2){
-            slider.value = -0.25;
-            numberInput.value = -0.25;
-        } else if(index === 4){
-            slider.value = -0.5;
-            numberInput.value = -0.5;
-        } else {
-            // Set other joints to zero
-            slider.value = 0;
-            numberInput.value = 0;
-        }
-    });
-    
-    // Trigger the existing sendJointCmd functionality
-    document.getElementById('sendJointCmd').click();
-});*/
-
 const MoveRollToConveyor = document.getElementById('MoveRollToConveyorBtn');
-
 MoveRollToConveyor.addEventListener('click', () => {
+    if (!state.selectedRobot) {
+        showNotification('Please select a robot first', 'warning');
+        return;
+    }
+
+    const jointGroups = document.querySelectorAll('.joint-slider-group');
+
+    // Target joint values
+    const targets = [];
+    jointGroups.forEach((_, index) => {
+        if (index === 1) targets[index] = -0.5;
+        else if (index === 2) targets[index] = 0.5;
+        else if (index === 4) targets[index] = -0.5;
+        else targets[index] = 0;
+    });
+
+    const starts = Array.from(jointGroups, group =>
+        parseFloat(group.querySelector('.joint-slider').value)
+    );
+
+    const duration = MOTION_CONFIG.DEFAULT_DURATION * 1000; // ms
+    const sendInterval = 1000 / MOTION_CONFIG.SEND_RATE_HZ;
+
+    const startTime = performance.now();
+    let lastSendTime = 0;
+
+    function smoothstep(t) {
+        return t * t * (3 - 2 * t); // smooth easing
+    }
+
+    function update(now) {
+        const elapsed = now - startTime;
+        const t = Math.min(elapsed / duration, 1);
+        const easedT = smoothstep(t);
+
+        jointGroups.forEach((group, index) => {
+            const slider = group.querySelector('.joint-slider');
+            const numberInput = group.querySelector('.joint-value');
+
+            const value =
+                starts[index] + (targets[index] - starts[index]) * easedT;
+
+            slider.value = value;
+            numberInput.value = value.toFixed(3);
+        });
+
+        // Send at fixed rate
+        if (now - lastSendTime >= sendInterval) {
+            sendJointCommand();
+            lastSendTime = now;
+        }
+
+        if (t < 1) {
+            requestAnimationFrame(update);
+        } else {
+            sendJointCommand(); // final snap
+            showNotification('Move to conveyor complete', 'success');
+        }
+    }
+
+    requestAnimationFrame(update);
+});
+
+/*MoveRollToConveyor.addEventListener('click', () => {
     const jointGroups = document.querySelectorAll('.joint-slider-group');
 
     // Build target values per joint
@@ -539,7 +578,7 @@ MoveRollToConveyor.addEventListener('click', () => {
     }
 
     requestAnimationFrame(animate);
-});
+});*/
 
 
 function getJointPositions() {
