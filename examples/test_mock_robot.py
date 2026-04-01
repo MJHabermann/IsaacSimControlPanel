@@ -96,11 +96,13 @@ class MockRobotNode(Node):
         self.get_logger().info(f'  - /{namespace}/cartesian_command')
     
     def joint_command_callback(self, msg: JointState):
-        """Handle joint command"""
+        """Handle incoming joint commands (position control only)"""
         if len(msg.position) > 0:
             for i, pos in enumerate(msg.position):
                 if i < self.num_joints:
                     self.target_positions[i] = pos
+            # Note: Velocity data from msg.velocity is no longer sent by the HMI
+            # This mock robot uses a P-controller to generate velocities internally
             self.get_logger().info(f'Received joint command: {list(msg.position)}')
     
     def cartesian_command_callback(self, msg: PoseStamped):

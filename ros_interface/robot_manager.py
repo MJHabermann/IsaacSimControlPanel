@@ -12,6 +12,8 @@ import queue
 import rclpy
 from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from std_msgs.msg import Bool
 
 from .publishers import RobotPublisher
 from .subscribers import RobotSubscriber
@@ -55,6 +57,9 @@ class RobotManager:
         self._state_callbacks: List[Callable] = []
         self._command_queue = queue.Queue()
         
+        # Trigger publishers for Cheese groups
+        self._trigger_publishers: Dict[str, Any] = {}
+        
         # Initialize ROS2
         if not rclpy.ok():
             rclpy.init()
@@ -63,6 +68,9 @@ class RobotManager:
         self._node = RobotManagerNode()
         self._executor = MultiThreadedExecutor(num_threads=4)
         self._executor.add_node(self._node)
+        
+        # Initialize trigger publishers
+        self._init_trigger_publishers()
         
         # Start spinning in background
         self._start_spinning()
@@ -90,6 +98,64 @@ class RobotManager:
             except Exception as e:
                 if self._running:
                     self._node.get_logger().error(f'Spin error: {e}')
+    
+    def _init_trigger_publishers(self):
+        """Initialize trigger publishers for Cheese groups"""
+        qos_profile = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10
+        )
+        
+        # Create publishers for each group
+        trigger_topics = [
+            '/Cheese/group1',
+            '/Cheese/group2',
+            '/Cheese/group3',
+            '/Cheese/group4'
+        ]
+        
+        for topic in trigger_topics:
+            pub = self._node.create_publisher(Bool, topic, qos_profile)
+            self._trigger_publishers[topic] = pub
+            self._node.get_logger().info(f'Created trigger publisher: {topic}')
+    
+    def send_trigger(self, group: int) -> bool:
+        """
+        Send a trigger pulse (True followed by False) to a Cheese group.
+        
+        Args:
+            group: Group number (1-4)
+            
+        Returns:
+            True if sent successfully
+        """
+        topic = f'/Cheese/group{group}'
+        
+        if topic not in self._trigger_publishers:
+            self._node.get_logger().error(f'Unknown trigger topic: {topic}')
+            return False
+        
+        pub = self._trigger_publishers[topic]
+        
+        # Send True
+        msg_true = Bool()
+        msg_true.data = True
+        pub.publish(msg_true)
+        self._node.get_logger().info(f'Trigger {topic}: True')
+        
+        # Schedule False after 100ms
+        def send_false():
+            time.sleep(0.1)  # 100ms delay
+            msg_false = Bool()
+            msg_false.data = False
+            pub.publish(msg_false)
+            self._node.get_logger().info(f'Trigger {topic}: False')
+        
+        # Run in separate thread to not block
+        threading.Thread(target=send_false, daemon=True).start()
+        
+        return True
     
     def add_robot(self, namespace: str, num_joints: int = 6, 
                   joint_names: Optional[List[str]] = None) -> bool:
@@ -179,13 +245,14 @@ class RobotManager:
                 for ns, robot in self._robots.items()
             }
     
-    def send_joint_command(self, namespace: str, positions: List[float]) -> bool:
+    def send_joint_command(self, namespace: str, positions: List[float], velocity: Optional[float] = None) -> bool:
         """
         Send joint command to a robot.
         
         Args:
             namespace: Robot namespace
             positions: Joint positions in radians
+            velocity: Joint velocity in rad/s (optional, default 0.01). Use 0.005 or less for slow motion
             
         Returns:
             True if sent successfully
@@ -193,28 +260,11 @@ class RobotManager:
         with self._lock:
             if namespace not in self._robots:
                 return False
-            return self._robots[namespace]['publisher'].publish_joint_command(positions)
-    
-    def send_cartesian_command(self, namespace: str, 
-                                position: Dict[str, float],
-                                orientation: Dict[str, float]) -> bool:
-        """
-        Send Cartesian command to a robot.
-        
-        Args:
-            namespace: Robot namespace
-            position: Position dict with x, y, z
-            orientation: Orientation dict with w, x, y, z
-            
-        Returns:
-            True if sent successfully
-        """
-        with self._lock:
-            if namespace not in self._robots:
-                return False
-            return self._robots[namespace]['publisher'].publish_cartesian_command(
-                position, orientation
+            return self._robots[namespace]['publisher'].publish_joint_command(
+                positions, velocity=velocity
             )
+    
+
     
     def send_joint_offset(self, namespace: str, offsets: List[float]) -> bool:
         """
@@ -243,32 +293,7 @@ class RobotManager:
                 current_positions, offsets
             )
     
-    def send_cartesian_offset(self, namespace: str,
-                               position_offset: Optional[Dict[str, float]] = None,
-                               orientation_offset: Optional[Dict[str, float]] = None) -> bool:
-        """
-        Apply Cartesian offsets to current pose.
-        
-        Args:
-            namespace: Robot namespace
-            position_offset: Position offset dict
-            orientation_offset: Orientation offset dict
-            
-        Returns:
-            True if sent successfully
-        """
-        with self._lock:
-            if namespace not in self._robots:
-                return False
-            
-            # Get current state
-            state = self._robots[namespace]['subscriber'].get_state()
-            current_pos = state['cartesian_pose']['position']
-            current_orient = state['cartesian_pose']['orientation']
-            
-            return self._robots[namespace]['publisher'].publish_cartesian_offset(
-                current_pos, current_orient, position_offset, orientation_offset
-            )
+
     
     def add_state_callback(self, callback: Callable):
         """Add a callback for state updates (for WebSocket streaming)"""

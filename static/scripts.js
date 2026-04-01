@@ -14,9 +14,77 @@ const CONFIG = {
 };
 
 const MOTION_CONFIG = {
-    SEND_RATE_HZ: 20,      // how often commands are sent
-    DEFAULT_DURATION: 25.0 // seconds to reach target
+    SEND_RATE_HZ: 60,      // how often commands are sent (60Hz for smooth motion)
+    DEFAULT_DURATION: 4.0  // seconds to reach target (for interpolated mode)
 };
+
+// ============== Motion Control State ==============
+const motionState = {
+    isMoving: false,
+    currentAnimationId: null,
+    currentMotionName: null
+};
+
+/**
+ * Quintic ease-in-out - very smooth acceleration and deceleration
+ * Better than smoothstep for robot motion
+ */
+function easeInOutQuintic(t) {
+    return t < 0.5
+        ? 16 * t * t * t * t * t
+        : 1 - Math.pow(-2 * t + 2, 5) / 2;
+}
+
+/**
+ * Stop any currently running motion
+ */
+function stopMotion() {
+    if (motionState.currentAnimationId) {
+        cancelAnimationFrame(motionState.currentAnimationId);
+        motionState.currentAnimationId = null;
+    }
+    
+    if (motionState.isMoving) {
+        motionState.isMoving = false;
+        motionState.currentMotionName = null;
+        updateStopButtonState();
+        showNotification('Motion stopped', 'warning');
+    }
+}
+
+/**
+ * Start a motion (for tracking purposes)
+ */
+function startMotion(motionName) {
+    motionState.isMoving = true;
+    motionState.currentMotionName = motionName;
+    updateStopButtonState();
+}
+
+/**
+ * Complete a motion successfully
+ */
+function completeMotion() {
+    motionState.isMoving = false;
+    motionState.currentAnimationId = null;
+    motionState.currentMotionName = null;
+    updateStopButtonState();
+}
+
+/**
+ * Update the Stop button enabled/disabled state
+ */
+function updateStopButtonState() {
+    // Update all stop motion buttons
+    document.querySelectorAll('.stopMotionBtn').forEach(btn => {
+        btn.disabled = !motionState.isMoving;
+        if (motionState.isMoving) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+}
 
 // ============== State Management ==============
 const state = {
@@ -25,11 +93,37 @@ const state = {
     selectedRobot: null,
     robots: [],
     robotStates: {},
+    robotConfigs: {},  // Track number of joints per robot: { 'Plug_Bot': 12, 'robot1': 6, ... }
+    robotSlots: { 1: null, 2: null },  // Track which robot is assigned to each slot (1 and 2)
+    selectedSlotOrder: [],  // Track the order in which slots were selected [1st selected robot, 2nd selected robot]
     autoRefresh: true,
     lastUpdateTime: null,
     updateCount: 0,
     updateRateInterval: null,
 };
+
+// ============== Authentication Helpers ==============
+/**
+ * Wrapper for fetch that handles authentication errors
+ * Redirects to login page if server returns 401 Unauthorized
+ */
+async function authFetch(url, options = {}) {
+    const response = await fetch(url, {
+        ...options,
+        credentials: 'same-origin'  // Include session cookies
+    });
+    
+    if (response.status === 401) {
+        // Session expired or not authenticated - redirect to login
+        showNotification('Session expired. Redirecting to login...', 'warning');
+        setTimeout(() => {
+            window.location.href = '/login';
+        }, 1500);
+        throw new Error('Unauthorized');
+    }
+    
+    return response;
+}
 
 // ============== Initialization ==============
 document.addEventListener('DOMContentLoaded', () => {
@@ -73,6 +167,16 @@ function initializeWebSocket() {
     state.socket.on('robot_list', (data) => {
         console.log('Received robot list:', data);
         state.robots = data.robots || [];
+        
+        // Set up robot configurations (default 6 joints, special cases override)
+        state.robots.forEach(robot => {
+            if (robot === 'Plug_Bot') {
+                state.robotConfigs[robot] = 12;  // Plug_Bot has 12 joints (6 arm + 6 gripper)
+            } else if (!state.robotConfigs[robot]) {
+                state.robotConfigs[robot] = 6;   // Default to 6 joints
+            }
+        });
+        
         updateRobotList();
     });
 
@@ -116,9 +220,49 @@ function setupEventListeners() {
         if (e.key === 'Enter') addRobot();
     });
 
-    // Joint control
-    document.getElementById('sendJointCmd').addEventListener('click', sendJointCommand);
-    document.getElementById('syncFromFeedback').addEventListener('click', syncJointsFromFeedback);
+    // Joint control - Slot-aware button listeners
+    document.querySelectorAll('.sendJointCmd').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const slot = parseInt(btn.dataset.slot);
+            sendJointCommandForSlot(slot);
+        });
+    });
+    
+    document.querySelectorAll('.syncFromFeedback').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const slot = parseInt(btn.dataset.slot);
+            syncJointsFromFeedbackForSlot(slot);
+        });
+    });
+    
+    document.querySelectorAll('.homeJointsBtn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const slot = parseInt(btn.dataset.slot);
+            homeJointsForSlot(slot);
+        });
+    });
+    
+    document.querySelectorAll('.PaperRollBtn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const slot = parseInt(btn.dataset.slot);
+            readyToRollForSlot(slot);
+        });
+    });
+    
+    document.querySelectorAll('.MoveRollToConveyorBtn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const slot = parseInt(btn.dataset.slot);
+            moveRollToConveyorForSlot(slot);
+        });
+    });
+    
+    document.querySelectorAll('.stopMotionBtn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const slot = parseInt(btn.dataset.slot);
+            stopMotionForSlot(slot);
+        });
+    });
+    
     
     // Setup joint sliders
     document.querySelectorAll('.joint-slider-group').forEach(group => {
@@ -144,30 +288,32 @@ function setupEventListeners() {
             });
         });
     });
-
-    // Cartesian control
-    document.getElementById('sendCartesianCmd').addEventListener('click', sendCartesianCommand);
-    document.getElementById('syncCartesianFromFeedback').addEventListener('click', syncCartesianFromFeedback);
     
-    // Cartesian offset buttons (inline)
-    document.querySelectorAll('.input-with-offset .btn-offset').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const targetId = btn.dataset.target;
-            const offset = parseFloat(btn.dataset.offset);
-            const input = document.getElementById(targetId);
-            input.value = (parseFloat(input.value) + offset).toFixed(3);
+    // Setup gripper slider
+    document.querySelectorAll('.gripper-slider-group').forEach(group => {
+        const slider = group.querySelector('.gripper-slider');
+        const valueInput = group.querySelector('.gripper-value');
+        
+        // Sync slider and input
+        slider.addEventListener('input', () => {
+            valueInput.value = parseFloat(slider.value).toFixed(3);
+        });
+        
+        valueInput.addEventListener('change', () => {
+            slider.value = valueInput.value;
+        });
+        
+        // Offset buttons for gripper
+        group.querySelectorAll('.gripper-offset').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const offset = parseFloat(btn.dataset.offset);
+                const newValue = parseFloat(slider.value) + offset;
+                slider.value = newValue;
+                valueInput.value = newValue.toFixed(3);
+            });
         });
     });
     
-    // Quick offset buttons
-    document.querySelectorAll('.quick-offsets .btn-small').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const axis = btn.dataset.axis;
-            const delta = parseFloat(btn.dataset.delta);
-            applyQuickCartesianOffset(axis, delta);
-        });
-    });
-
     // Auto-refresh toggle
     document.getElementById('autoRefreshToggle').addEventListener('change', (e) => {
         state.autoRefresh = e.target.checked;
@@ -175,12 +321,20 @@ function setupEventListeners() {
             subscribeToRobot(state.selectedRobot);
         }
     });
+
+    // Trigger buttons
+    document.querySelectorAll('.btn-trigger').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const group = parseInt(btn.dataset.group);
+            sendTrigger(group, btn);
+        });
+    });
 }
 
 // ============== Robot Management ==============
 async function scanForRobots() {
     try {
-        const response = await fetch('/api/robots/scan', { method: 'POST' });
+        const response = await authFetch('/api/robots/scan', { method: 'POST' });
         const data = await response.json();
         
         if (data.success && data.discovered.length > 0) {
@@ -216,7 +370,7 @@ async function addRobot() {
 
 async function addRobotByNamespace(namespace) {
     try {
-        const response = await fetch('/api/robots/add', {
+        const response = await authFetch('/api/robots/add', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ namespace })
@@ -228,8 +382,11 @@ async function addRobotByNamespace(namespace) {
             if (!state.robots.includes(namespace)) {
                 state.robots.push(namespace);
             }
+            // Store the number of joints for this robot (default 6)
+            state.robotConfigs[namespace] = data.num_joints || 6;
+            
             updateRobotList();
-            showNotification(`Added robot: ${namespace}`, 'success');
+            showNotification(`Added robot: ${namespace} (${state.robotConfigs[namespace]} joints)`, 'success');
             
             // Auto-select if first robot
             if (state.robots.length === 1) {
@@ -246,7 +403,7 @@ async function addRobotByNamespace(namespace) {
 
 async function removeRobot(namespace) {
     try {
-        const response = await fetch('/api/robots/remove', {
+        const response = await authFetch('/api/robots/remove', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ namespace })
@@ -301,15 +458,81 @@ function updateRobotList() {
 }
 
 function selectRobot(namespace) {
-    state.selectedRobot = namespace;
+    // Check if robot is already selected
+    const alreadySelected = Object.values(state.robotSlots).includes(namespace);
+    
+    if (alreadySelected) {
+        // If already selected, remove it from slots
+        for (let slot in state.robotSlots) {
+            if (state.robotSlots[slot] === namespace) {
+                state.robotSlots[slot] = null;
+                break;
+            }
+        }
+        state.selectedSlotOrder = state.selectedSlotOrder.filter(r => r !== namespace);
+        showNotification(`Removed ${namespace} from control`, 'info');
+    } else {
+        // Find the first empty slot or use the oldest selected robot's slot
+        let assignedSlot = null;
+        for (let slot of [1, 2]) {
+            if (state.robotSlots[slot] === null) {
+                assignedSlot = slot;
+                break;
+            }
+        }
+        
+        // If no empty slot, replace the first one selected
+        if (assignedSlot === null) {
+            assignedSlot = state.selectedSlotOrder.length > 0 ? 1 : 1;
+            const replacedRobot = state.robotSlots[assignedSlot];
+            if (replacedRobot) {
+                state.selectedSlotOrder = state.selectedSlotOrder.filter(r => r !== replacedRobot);
+            }
+        }
+        
+        state.robotSlots[assignedSlot] = namespace;
+        state.selectedSlotOrder.push(namespace);
+        state.selectedRobot = namespace;
+        
+        subscribeToRobot(namespace);
+        fetchRobotState(namespace);
+        showNotification(`${namespace} assigned to Slot ${assignedSlot}`, 'success');
+    }
+    
     updateRobotList();
-    updateSelectedRobotDisplay();
-    subscribeToRobot(namespace);
-    
-    // Fetch initial state
-    fetchRobotState(namespace);
-    
-    showNotification(`Selected robot: ${namespace}`, 'info');
+    updateSlotAssignments();
+}
+
+function updateSlotAssignments() {
+    // Update the display labels in each slot
+    for (let slot of [1, 2]) {
+        const robot = state.robotSlots[slot];
+        const label = document.querySelector(`.robot-slot-${slot}`);
+        if (label) {
+            const displayText = robot ? robot : 'No robot assigned';
+            if (label.textContent !== displayText) {
+                label.textContent = displayText;
+            }
+        }
+        
+        // Show/hide gripper section based on number of joints
+        const slotPanel = document.querySelector(`.joint-control-panel[data-slot="${slot}"]`);
+        if (slotPanel) {
+            const gripperSections = slotPanel.querySelectorAll('.gripper-section');
+            const gripperSliderGroup = slotPanel.querySelector('.gripper-slider-group');
+            
+            const numJoints = robot && state.robotConfigs[robot] ? state.robotConfigs[robot] : 6;
+            const shouldShowGripper = numJoints > 6;
+            
+            gripperSections.forEach(section => {
+                section.style.display = shouldShowGripper ? 'block' : 'none';
+            });
+            
+            if (gripperSliderGroup) {
+                gripperSliderGroup.style.display = shouldShowGripper ? 'block' : 'none';
+            }
+        }
+    }
 }
 
 function subscribeToRobot(namespace) {
@@ -320,14 +543,16 @@ function subscribeToRobot(namespace) {
 
 function updateSelectedRobotDisplay() {
     const robotName = state.selectedRobot || 'No robot selected';
-    document.getElementById('selectedRobotJoint').textContent = robotName;
-    document.getElementById('selectedRobotCartesian').textContent = robotName;
+    const el = document.getElementById('selectedRobotJoint');
+    if (el) {
+        el.textContent = robotName;
+    }
 }
 
 // ============== State Updates ==============
 async function fetchRobotState(namespace) {
     try {
-        const response = await fetch(`/api/robot/${namespace}/state`);
+        const response = await authFetch(`/api/robot/${namespace}/state`);
         const data = await response.json();
         
         if (data.success) {
@@ -350,9 +575,11 @@ function handleRobotStateUpdate(data) {
     // Track update rate
     state.updateCount++;
     
-    // Only update UI if this is the selected robot
-    if (namespace === state.selectedRobot) {
-        updateFeedbackDisplay(robotState);
+    // Update feedback for all slots where this robot is assigned
+    for (let slot of [1, 2]) {
+        if (state.robotSlots[slot] === namespace) {
+            updateFeedbackDisplayForSlot(robotState, slot);
+        }
     }
 }
 
@@ -364,14 +591,12 @@ function updateFeedbackDisplay(robotState) {
     if (jointStates.positions && jointStates.positions.length > 0) {
         tbody.innerHTML = jointStates.positions.map((pos, i) => {
             const name = jointStates.names[i] || `Joint ${i + 1}`;
-            const velocity = jointStates.velocities[i] ?? '--';
             const effort = jointStates.efforts[i] ?? '--';
             
             return `
                 <tr>
                     <td>${name}</td>
                     <td>${formatNumber(pos)}</td>
-                    <td>${typeof velocity === 'number' ? formatNumber(velocity) : velocity}</td>
                     <td>${typeof effort === 'number' ? formatNumber(effort) : effort}</td>
                 </tr>
             `;
@@ -380,36 +605,35 @@ function updateFeedbackDisplay(robotState) {
         // Update joint slider labels to match the actual joint names
         updateJointSliderLabels(jointStates.names);
     } else {
-        tbody.innerHTML = '<tr><td colspan="4" class="no-data">No joint data available</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="3" class="no-data">No joint data available</td></tr>';
     }
+}
+
+function updateFeedbackDisplayForSlot(robotState, slot) {
+    // Update joint slider labels for a specific slot
+    const jointStates = robotState.joint_states;
     
-    // Update Cartesian pose feedback
-    const pose = robotState.cartesian_pose;
-    
-    document.getElementById('fbPosX').textContent = formatNumber(pose.position.x);
-    document.getElementById('fbPosY').textContent = formatNumber(pose.position.y);
-    document.getElementById('fbPosZ').textContent = formatNumber(pose.position.z);
-    
-    document.getElementById('fbOrientW').textContent = formatNumber(pose.orientation.w);
-    document.getElementById('fbOrientX').textContent = formatNumber(pose.orientation.x);
-    document.getElementById('fbOrientY').textContent = formatNumber(pose.orientation.y);
-    document.getElementById('fbOrientZ').textContent = formatNumber(pose.orientation.z);
-    
-    // Update timestamp
-    if (pose.timestamp) {
-        const date = new Date(pose.timestamp);
-        document.getElementById('poseTimestamp').textContent = `Last update: ${date.toLocaleTimeString()}`;
+    if (jointStates.names) {
+        updateJointSliderLabels(jointStates.names, slot);
     }
 }
 
 // ============== Joint Control ==============
-function updateJointSliderLabels(jointNames) {
+function updateJointSliderLabels(jointNames, slot = null) {
     /**
      * Update the joint slider labels to match actual joint names from the robot
+     * If slot is specified, only update sliders in that slot
      */
     if (!jointNames || jointNames.length === 0) return;
     
-    const sliderGroups = document.querySelectorAll('.joint-slider-group');
+    let sliderGroups;
+    if (slot) {
+        const slotPanel = document.querySelector(`.joint-control-panel[data-slot="${slot}"]`);
+        sliderGroups = slotPanel ? slotPanel.querySelectorAll('.joint-slider-group') : [];
+    } else {
+        sliderGroups = document.querySelectorAll('.joint-slider-group');
+    }
+    
     sliderGroups.forEach((group, i) => {
         if (i < jointNames.length) {
             const label = group.querySelector('label');
@@ -419,166 +643,7 @@ function updateJointSliderLabels(jointNames) {
         }
     });
 }
-// Home button handler
-const homeButton = document.getElementById('homeJointsBtn');
-homeButton.addEventListener('click', () => {
-    // Select all joint sliders and number inputs
-    const jointGroups = document.querySelectorAll('.joint-slider-group');
 
-    jointGroups.forEach(group => {
-        const slider = group.querySelector('.joint-slider');
-        const numberInput = group.querySelector('.joint-value');
-
-        // Set values to zero
-        slider.value = 0;
-        numberInput.value = 0;
-    });
-
-    // Trigger the existing sendJointCmd functionality
-    document.getElementById('sendJointCmd').click();
-});
-
-const paperRollButton = document.getElementById('PaperRollBtn');
-paperRollButton.addEventListener('click', () => {
-    // Select all joint sliders and number inputs
-    const jointGroups = document.querySelectorAll('.joint-slider-group');
-    
-    jointGroups.forEach((group, index) => {
-        const slider = group.querySelector('.joint-slider');
-        const numberInput = group.querySelector('.joint-value');
-        if(index === 1){
-            slider.value = 0.30;
-            numberInput.value = 0.30;
-        }
-        else if(index === 2){
-            slider.value = -0.5;
-            numberInput.value = -0.5;
-        } else if(index === 4){
-            slider.value = -0.5;
-            numberInput.value = -0.5;
-        } else {
-            // Set other joints to zero
-            slider.value = 0;
-            numberInput.value = 0;
-        }
-    });
-    
-    // Trigger the existing sendJointCmd functionality
-    document.getElementById('sendJointCmd').click();
-});
-
-const MoveRollToConveyor = document.getElementById('MoveRollToConveyorBtn');
-MoveRollToConveyor.addEventListener('click', () => {
-    if (!state.selectedRobot) {
-        showNotification('Please select a robot first', 'warning');
-        return;
-    }
-
-    const jointGroups = document.querySelectorAll('.joint-slider-group');
-
-    // Target joint values
-    const targets = [];
-    jointGroups.forEach((_, index) => {
-        if (index === 1) targets[index] = -0.5;
-        else if (index === 2) targets[index] = 0.5;
-        else if (index === 4) targets[index] = -0.5;
-        else targets[index] = 0;
-    });
-
-    const starts = Array.from(jointGroups, group =>
-        parseFloat(group.querySelector('.joint-slider').value)
-    );
-
-    const duration = MOTION_CONFIG.DEFAULT_DURATION * 1000; // ms
-    const sendInterval = 1000 / MOTION_CONFIG.SEND_RATE_HZ;
-
-    const startTime = performance.now();
-    let lastSendTime = 0;
-
-    function smoothstep(t) {
-        return t * t * (3 - 2 * t); // smooth easing
-    }
-
-    function update(now) {
-        const elapsed = now - startTime;
-        const t = Math.min(elapsed / duration, 1);
-        const easedT = smoothstep(t);
-
-        jointGroups.forEach((group, index) => {
-            const slider = group.querySelector('.joint-slider');
-            const numberInput = group.querySelector('.joint-value');
-
-            const value =
-                starts[index] + (targets[index] - starts[index]) * easedT;
-
-            slider.value = value;
-            numberInput.value = value.toFixed(3);
-        });
-
-        // Send at fixed rate
-        if (now - lastSendTime >= sendInterval) {
-            sendJointCommand();
-            lastSendTime = now;
-        }
-
-        if (t < 1) {
-            requestAnimationFrame(update);
-        } else {
-            sendJointCommand(); // final snap
-            showNotification('Move to conveyor complete', 'success');
-        }
-    }
-
-    requestAnimationFrame(update);
-});
-
-/*MoveRollToConveyor.addEventListener('click', () => {
-    const jointGroups = document.querySelectorAll('.joint-slider-group');
-
-    // Build target values per joint
-    const targets = [];
-
-    jointGroups.forEach((group, index) => {
-        if (index === 1) targets[index] = -0.5;
-        else if (index === 2) targets[index] = 0.5;
-        else if (index === 4) targets[index] = 0.5;
-        else targets[index] = 0;
-    });
-    const speed = 0.01; // radians per ms
-    const duration = 20000; // ms (tweak for speed)
-    const startTime = performance.now();
-
-    // Capture starting values
-    const starts = Array.from(jointGroups, group =>
-        parseFloat(group.querySelector('.joint-slider').value)
-    );
-
-    function animate(time) {
-        const elapsed = time - startTime;
-        const t = Math.min(elapsed / duration, 1); // 0 → 1
-
-        jointGroups.forEach((group, index) => {
-            const slider = group.querySelector('.joint-slider');
-            const numberInput = group.querySelector('.joint-value');
-
-            // Linear interpolation (lerp)
-            const value =
-                starts[index] + (targets[index] - starts[index]) * t;
-
-            slider.value = value;
-            numberInput.value = value;
-        });
-
-        // Send joint command continuously while animating
-        document.getElementById('sendJointCmd').click();
-
-        if (t < 1) {
-            requestAnimationFrame(animate);
-        }
-    }
-
-    requestAnimationFrame(animate);
-});*/
 
 
 function getJointPositions() {
@@ -601,6 +666,67 @@ function setJointPositions(positions) {
     });
 }
 
+// Slot-aware versions of joint position getters/setters
+function getJointPositionsForSlot(slot) {
+    const positions = [];
+    const slotPanel = document.querySelector(`.joint-control-panel[data-slot="${slot}"]`);
+    if (!slotPanel) return positions;
+    
+    const robot = state.robotSlots[slot];
+    // Get the number of joints this robot has (default 6 if not configured)
+    const numJoints = robot && state.robotConfigs[robot] ? state.robotConfigs[robot] : 6;
+    
+    // Collect arm joint positions (0-5)
+    let jointIndex = 0;
+    slotPanel.querySelectorAll('.joint-slider-group').forEach(group => {
+        if (jointIndex < numJoints && jointIndex < 6) {
+            const value = parseFloat(group.querySelector('.joint-slider').value);
+            positions.push(value);
+            jointIndex++;
+        }
+    });
+    
+    // If robot has gripper joints, get them from the gripper slider
+    if (numJoints > 6) {
+        const gripperSlider = slotPanel.querySelector('.gripper-slider');
+        if (gripperSlider) {
+            const gripperValue = parseFloat(gripperSlider.value);
+            // Set all 6 gripper joints (indices 6-11) to the same value
+            for (let i = 6; i < numJoints; i++) {
+                positions.push(gripperValue);
+            }
+        }
+    }
+    
+    return positions;
+}
+
+function setJointPositionsForSlot(slot, positions) {
+    const slotPanel = document.querySelector(`.joint-control-panel[data-slot="${slot}"]`);
+    if (!slotPanel) return;
+    
+    // Set arm joint positions (0-5)
+    slotPanel.querySelectorAll('.joint-slider-group').forEach((group, i) => {
+        if (i < positions.length && i < 6) {
+            const slider = group.querySelector('.joint-slider');
+            const valueInput = group.querySelector('.joint-value');
+            slider.value = positions[i];
+            valueInput.value = positions[i].toFixed(2);
+        }
+    });
+    
+    // Set gripper slider if there are gripper positions (6+)
+    if (positions.length > 6) {
+        const gripperSlider = slotPanel.querySelector('.gripper-slider');
+        const gripperValue = slotPanel.querySelector('.gripper-value');
+        if (gripperSlider) {
+            // Use the first gripper joint value (they should all be the same anyway)
+            gripperSlider.value = positions[6];
+            gripperValue.value = positions[6].toFixed(3);
+        }
+    }
+}
+
 function sendJointCommand() {
     if (!state.selectedRobot) {
         showNotification('Please select a robot first', 'warning');
@@ -616,7 +742,7 @@ function sendJointCommand() {
         });
     } else {
         // Fallback to REST API
-        fetch(`/api/robot/${state.selectedRobot}/joint_command`, {
+        authFetch(`/api/robot/${state.selectedRobot}/joint_command`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ positions })
@@ -628,6 +754,34 @@ function sendJointCommand() {
             }
         });
     }
+}
+
+// Send trigger pulse (True then False) to /Cheese/groupN topic
+function sendTrigger(group, btn) {
+    // Visual feedback - disable button briefly
+    btn.disabled = true;
+    btn.classList.add('triggering');
+    
+    if (state.socket && state.connected) {
+        state.socket.emit('send_trigger', { group });
+    } else {
+        // Fallback to REST API
+        authFetch(`/api/trigger/${group}`, {
+            method: 'POST'
+        }).then(r => r.json()).then(data => {
+            if (!data.success) {
+                showNotification(`Trigger G${group} failed`, 'error');
+            }
+        }).catch(() => {
+            showNotification(`Trigger G${group} failed`, 'error');
+        });
+    }
+    
+    // Re-enable after 200ms (trigger takes 100ms)
+    setTimeout(() => {
+        btn.disabled = false;
+        btn.classList.remove('triggering');
+    }, 200);
 }
 
 function syncJointsFromFeedback() {
@@ -645,104 +799,209 @@ function syncJointsFromFeedback() {
     }
 }
 
-// ============== Cartesian Control ==============
-function getCartesianPose() {
-    return {
-        position: {
-            x: parseFloat(document.getElementById('posX').value) || 0,
-            y: parseFloat(document.getElementById('posY').value) || 0,
-            z: parseFloat(document.getElementById('posZ').value) || 0,
-        },
-        orientation: {
-            w: parseFloat(document.getElementById('orientW').value) || 1,
-            x: parseFloat(document.getElementById('orientX').value) || 0,
-            y: parseFloat(document.getElementById('orientY').value) || 0,
-            z: parseFloat(document.getElementById('orientZ').value) || 0,
-        }
-    };
-}
-
-function setCartesianPose(position, orientation) {
-    document.getElementById('posX').value = position.x.toFixed(3);
-    document.getElementById('posY').value = position.y.toFixed(3);
-    document.getElementById('posZ').value = position.z.toFixed(3);
-    
-    document.getElementById('orientW').value = orientation.w.toFixed(3);
-    document.getElementById('orientX').value = orientation.x.toFixed(3);
-    document.getElementById('orientY').value = orientation.y.toFixed(3);
-    document.getElementById('orientZ').value = orientation.z.toFixed(3);
-}
-
-function sendCartesianCommand() {
-    if (!state.selectedRobot) {
-        showNotification('Please select a robot first', 'warning');
+// Slot-aware command functions
+function sendJointCommandForSlot(slot) {
+    const robot = state.robotSlots[slot];
+    if (!robot) {
+        showNotification(`No robot assigned to Slot ${slot}`, 'warning');
         return;
     }
     
-    const pose = getCartesianPose();
+    const positions = getJointPositionsForSlot(slot);
     
     if (state.socket && state.connected) {
-        state.socket.emit('send_cartesian_command', {
-            namespace: state.selectedRobot,
-            position: pose.position,
-            orientation: pose.orientation
+        state.socket.emit('send_joint_command', {
+            namespace: robot,
+            positions
         });
     } else {
-        fetch(`/api/robot/${state.selectedRobot}/cartesian_command`, {
+        // Fallback to REST API
+        authFetch(`/api/robot/${robot}/joint_command`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                position: pose.position,
-                orientation: pose.orientation
-            })
+            body: JSON.stringify({ positions })
         }).then(r => r.json()).then(data => {
             if (data.success) {
-                showNotification('Cartesian command sent', 'success');
+                showNotification(`Joint command sent to ${robot}`, 'success');
             } else {
-                showNotification('Failed to send Cartesian command', 'error');
+                showNotification('Failed to send joint command', 'error');
             }
         });
     }
 }
 
-function syncCartesianFromFeedback() {
-    if (!state.selectedRobot || !state.robotStates[state.selectedRobot]) {
-        showNotification('No feedback data available', 'warning');
+function syncJointsFromFeedbackForSlot(slot) {
+    const robot = state.robotSlots[slot];
+    if (!robot) {
+        showNotification(`No robot assigned to Slot ${slot}`, 'warning');
         return;
     }
     
-    const robotState = state.robotStates[state.selectedRobot];
-    const pose = robotState.cartesian_pose;
+    if (!state.robotStates[robot]) {
+        showNotification(`No feedback data available for ${robot}`, 'warning');
+        return;
+    }
     
-    setCartesianPose(pose.position, pose.orientation);
-    showNotification('Synced Cartesian pose from feedback', 'success');
+    const robotState = state.robotStates[robot];
+    const positions = robotState.joint_states.positions;
+    
+    if (positions && positions.length > 0) {
+        setJointPositionsForSlot(slot, positions);
+        showNotification(`Synced ${robot} from feedback`, 'success');
+    }
 }
 
-function applyQuickCartesianOffset(axis, delta) {
-    if (!state.selectedRobot) {
-        showNotification('Please select a robot first', 'warning');
+function homeJointsForSlot(slot) {
+    const robot = state.robotSlots[slot];
+    if (!robot) {
+        showNotification(`No robot assigned to Slot ${slot}`, 'warning');
         return;
     }
     
-    const positionOffset = { x: 0, y: 0, z: 0 };
-    positionOffset[axis] = delta;
+    // Set all joint sliders in this slot to 0
+    const slotPanel = document.querySelector(`.joint-control-panel[data-slot="${slot}"]`);
+    if (!slotPanel) return;
     
-    if (state.socket && state.connected) {
-        state.socket.emit('send_cartesian_offset', {
-            namespace: state.selectedRobot,
-            position_offset: positionOffset
-        });
-    } else {
-        fetch(`/api/robot/${state.selectedRobot}/cartesian_offset`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ position_offset: positionOffset })
-        }).then(r => r.json()).then(data => {
-            if (data.success) {
-                showNotification(`Applied ${axis.toUpperCase()} offset: ${delta}`, 'success');
-            }
-        });
+    slotPanel.querySelectorAll('.joint-slider-group').forEach(group => {
+        const slider = group.querySelector('.joint-slider');
+        const valueInput = group.querySelector('.joint-value');
+        slider.value = 0;
+        valueInput.value = '0.00';
+    });
+    
+    // Send the joint command to the robot in this slot
+    sendJointCommandForSlot(slot);
+    showNotification(`${robot} joints homed`, 'success');
+}
+
+function readyToRollForSlot(slot) {
+    const robot = state.robotSlots[slot];
+    if (!robot) {
+        showNotification(`No robot assigned to Slot ${slot}`, 'warning');
+        return;
     }
+    
+    // Set specific joint positions for ready to roll
+    const slotPanel = document.querySelector(`.joint-control-panel[data-slot="${slot}"]`);
+    if (!slotPanel) return;
+    
+    const positions = [0, 0.30, -0.5, 0, -0.5];  // Default ready to roll positions
+    slotPanel.querySelectorAll('.joint-slider-group').forEach((group, index) => {
+        if (index < positions.length) {
+            const slider = group.querySelector('.joint-slider');
+            const valueInput = group.querySelector('.joint-value');
+            slider.value = positions[index];
+            valueInput.value = positions[index].toFixed(2);
+        }
+    });
+    
+    // Send the joint command to the robot in this slot
+    sendJointCommandForSlot(slot);
+    showNotification(`${robot} ready to roll`, 'success');
+}
+
+function moveRollToConveyorForSlot(slot) {
+    const robot = state.robotSlots[slot];
+    if (!robot) {
+        showNotification(`No robot assigned to Slot ${slot}`, 'warning');
+        return;
+    }
+    
+    // Stop any existing motion first
+    if (motionState.isMoving) {
+        stopMotion();
+        return;
+    }
+
+    const slotPanel = document.querySelector(`.joint-control-panel[data-slot="${slot}"]`);
+    if (!slotPanel) return;
+
+    const jointGroups = slotPanel.querySelectorAll('.joint-slider-group');
+
+    // Target joint values for move to conveyor
+    const targets = [];
+    jointGroups.forEach((_, index) => {
+        if (index === 1) targets[index] = -0.5;
+        else if (index === 2) targets[index] = 0.5;
+        else if (index === 4) targets[index] = -0.5;
+        else targets[index] = 0;
+    });
+
+    // Set target positions in UI
+    jointGroups.forEach((group, index) => {
+        const slider = group.querySelector('.joint-slider');
+        const valueInput = group.querySelector('.joint-value');
+        slider.value = targets[index];
+        valueInput.value = targets[index].toFixed(3);
+    });
+    
+    // Send the joint command to the robot in this slot
+    sendJointCommandForSlot(slot);
+    showNotification('Move Roll to Conveyor command sent', 'success');
+    return;
+
+    // Interpolated mode: Gradually send intermediate positions
+    const starts = Array.from(jointGroups, group =>
+        parseFloat(group.querySelector('.joint-slider').value)
+    );
+
+    const duration = MOTION_CONFIG.DEFAULT_DURATION * 1000; // ms
+    const sendInterval = 1000 / MOTION_CONFIG.SEND_RATE_HZ;
+
+    const startTime = performance.now();
+    let lastSendTime = 0;
+    
+    // Start motion tracking
+    startMotion('Move Roll to Conveyor');
+
+    function update(now) {
+        // Check if motion was cancelled
+        if (!motionState.isMoving) {
+            return;
+        }
+        
+        const elapsed = now - startTime;
+        const t = Math.min(elapsed / duration, 1);
+        const easedT = easeInOutQuintic(t);
+
+        jointGroups.forEach((group, index) => {
+            const slider = group.querySelector('.joint-slider');
+            const valueInput = group.querySelector('.joint-value');
+
+            const value =
+                starts[index] + (targets[index] - starts[index]) * easedT;
+
+            slider.value = value;
+            valueInput.value = value.toFixed(3);
+        });
+
+        // Send at fixed rate
+        if (now - lastSendTime >= sendInterval) {
+            sendJointCommandForSlot(slot);
+            lastSendTime = now;
+        }
+
+        if (t < 1) {
+            motionState.currentAnimationId = requestAnimationFrame(update);
+        } else {
+            sendJointCommandForSlot(slot); // final snap
+            completeMotion();
+            showNotification('Move to conveyor complete', 'success');
+        }
+    }
+
+    motionState.currentAnimationId = requestAnimationFrame(update);
+}
+
+function stopMotionForSlot(slot) {
+    const robot = state.robotSlots[slot];
+    if (!robot) {
+        showNotification(`No robot assigned to Slot ${slot}`, 'warning');
+        return;
+    }
+    
+    // Just stop the motion animation (works globally)
+    stopMotion();
 }
 
 // ============== UI Utilities ==============

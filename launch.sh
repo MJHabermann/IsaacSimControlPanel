@@ -48,9 +48,20 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-# Check for Flask
-if ! python3 -c "import flask" 2>/dev/null; then
-    echo -e "${YELLOW}Flask not installed. Installing requirements...${NC}"
+# Setup virtual environment
+VENV_DIR="$SCRIPT_DIR/.venv"
+if [ ! -d "$VENV_DIR" ]; then
+    echo -e "${YELLOW}Creating virtual environment...${NC}"
+    python3 -m venv "$VENV_DIR" --system-site-packages
+fi
+
+# Activate virtual environment
+source "$VENV_DIR/bin/activate"
+echo -e "${GREEN}Using virtual environment: $VENV_DIR${NC}"
+
+# Check for Flask and install requirements if needed
+if ! python3 -c "import flask; import flask_login" 2>/dev/null; then
+    echo -e "${YELLOW}Installing requirements...${NC}"
     pip install -r "$SCRIPT_DIR/requirements.txt"
 fi
 
@@ -77,4 +88,5 @@ echo ""
 
 # Run the Flask app
 cd "$SCRIPT_DIR"
+export HMI_ADMIN_PASSWORD_HASH='scrypt:32768:8:1$yOsIi8xzpcxajNL4$32a6fe37acd1aee36212bd6083d22703f4d54bbac1b0526eba7fc8414cbc2a27914087f6edf772f5b564c4cab4ae20128c4e2345e1b67e770edefe4e346f5049'
 python3 app.py

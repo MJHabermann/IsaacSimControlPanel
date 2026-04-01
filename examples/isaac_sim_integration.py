@@ -79,15 +79,37 @@ class IsaacSimRobotBridge(Node):
         
         # Store latest commands
         self.target_positions: Optional[np.ndarray] = None
+        # Per-command speed from HMI (rad/s). If None, use position-only control.
+        self.target_speeds: Optional[np.ndarray] = None
         self.target_pose: Optional[PoseStamped] = None
         
         self.get_logger().info(f'Isaac Sim Robot Bridge initialized for {robot_name}')
     
     def joint_command_callback(self, msg: JointState):
-        """Handle incoming joint commands"""
+        """Handle incoming joint commands (position + optional per-joint speed)."""
         if len(msg.position) > 0:
+            # Target joint positions from HMI
             self.target_positions = np.array(msg.position[:self.num_joints])
-            self.get_logger().debug(f'Received joint command: {self.target_positions}')
+
+            # Optional velocity array from HMI. We interpret this as "desired speed" in rad/s.
+            if len(msg.velocity) > 0:
+                v = np.array(msg.velocity[:self.num_joints])
+                # Clamp to positive speeds, fall back to default where invalid
+                v[v <= 0.0] = np.nan
+                if np.all(np.isnan(v)):
+                    self.target_speeds = None
+                else:
+                    # Replace NaNs with default 0.5 rad/s
+                    default_speed = 0.5
+                    v = np.where(np.isnan(v), default_speed, v)
+                    self.target_speeds = v
+            else:
+                self.target_speeds = None
+
+            self.get_logger().debug(
+                f'Received joint command: positions={self.target_positions}, '
+                f'speeds={self.target_speeds}'
+            )
     
     def cartesian_command_callback(self, msg: PoseStamped):
         """Handle incoming Cartesian commands"""
@@ -112,7 +134,12 @@ class IsaacSimRobotBridge(Node):
         joint_msg.header.frame_id = self.robot_name
         joint_msg.name = self.joint_names
         joint_msg.position = joint_positions.tolist() if joint_positions is not None else []
-        joint_msg.velocity = joint_velocities.tolist() if joint_velocities is not None else []
+        # Ensure velocity array is always populated (with actual values or defaults)
+        if joint_velocities is not None:
+            joint_msg.velocity = joint_velocities.tolist()
+        else:
+            # If velocities can't be obtained, default to 0.01 rad/s to avoid NaN in ROS2 graphs
+            joint_msg.velocity = [0.01] * len(self.joint_names)
         
         self.joint_state_pub.publish(joint_msg)
         
@@ -159,9 +186,51 @@ class IsaacSimRobotBridge(Node):
             return None
     
     def apply_commands(self):
-        """Apply stored commands to the robot"""
-        if self.target_positions is not None:
+        """Apply stored commands to the robot.
+
+        If target_speeds is provided from the HMI, we use velocity control
+        (set_joint_velocity_targets) to move toward target_positions at
+        approximately the requested speed. Otherwise we fall back to the
+        original position-only control.
+        """
+        if self.target_positions is None:
+            return
+
+        # No speed specified: behave like the original example
+        if self.target_speeds is None:
             self.articulation.set_joint_position_targets(self.target_positions)
+            return
+
+        # With speed: compute a velocity command towards the target
+        current_positions = self.articulation.get_joint_positions()
+        if current_positions is None:
+            # Fallback to direct targeting
+            self.articulation.set_joint_position_targets(self.target_positions)
+            return
+
+        current_positions = np.array(current_positions[: self.num_joints])
+        target = self.target_positions
+
+        # Ensure speeds vector matches joint count
+        speeds = self.target_speeds
+        if speeds.shape[0] < self.num_joints:
+            # Pad with last value if shorter
+            last = speeds[-1]
+            speeds = np.pad(speeds, (0, self.num_joints - speeds.shape[0]), constant_values=last)
+
+        speeds = speeds[: self.num_joints]
+
+        # Direction toward target
+        diff = target - current_positions
+        eps = 1e-3
+
+        # For joints that are effectively at target, command zero velocity
+        vel_cmd = np.zeros_like(diff)
+        moving_mask = np.abs(diff) > eps
+        vel_cmd[moving_mask] = np.sign(diff[moving_mask]) * speeds[moving_mask]
+
+        # Send velocity targets; Isaac Sim joint drives will move until close to target.
+        self.articulation.set_joint_velocity_targets(vel_cmd)
 
 
 def setup_robot_bridge(world: World, robot_prim_path: str, robot_name: str) -> IsaacSimRobotBridge:
