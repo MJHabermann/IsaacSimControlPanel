@@ -391,6 +391,19 @@ def send_trigger(group: int):
     })
 
 
+@app.route('/api/trigger/roll-holder', methods=['POST'])
+@login_required
+def send_roll_holder_trigger():
+    """Send trigger pulse to open Roll Holder"""
+    manager = get_manager()
+    success = manager.send_roll_holder_trigger()
+    
+    return jsonify({
+        'success': success,
+        'action': 'open_roll_holder'
+    })
+
+
 # ============== WebSocket Events ==============
 
 @socketio.on('connect')
@@ -494,6 +507,20 @@ def handle_trigger(data):
         'type': 'trigger',
         'success': success,
         'group': group
+    })
+
+
+@socketio.on('send_roll_holder_trigger')
+@authenticated_only
+def handle_roll_holder_trigger():
+    """Handle roll holder trigger command via WebSocket"""
+    manager = get_manager()
+    success = manager.send_roll_holder_trigger()
+    
+    emit('command_result', {
+        'type': 'roll_holder_trigger',
+        'success': success,
+        'action': 'open_roll_holder'
     })
 
 

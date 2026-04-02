@@ -329,6 +329,49 @@ function setupEventListeners() {
             sendTrigger(group, btn);
         });
     });
+
+    // Roll Holder button
+    const rollHolderBtn = document.getElementById('rollHolderOpenBtn');
+    if (rollHolderBtn) {
+        rollHolderBtn.addEventListener('click', () => {
+            sendRollHolderTrigger(rollHolderBtn);
+        });
+    }
+
+    // Cartesian control - Slot-aware button listeners
+    document.querySelectorAll('.sendCartesianCmd').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const slot = parseInt(btn.dataset.slot);
+            sendCartesianCommandForSlot(slot);
+        });
+    });
+    
+    document.querySelectorAll('.syncCartesianFromFeedback').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const slot = parseInt(btn.dataset.slot);
+            syncCartesianFromFeedbackForSlot(slot);
+        });
+    });
+
+    // Cartesian offset buttons for position inputs
+    document.querySelectorAll('.cartesian-inputs .input-with-offset .btn-offset').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const targetId = btn.dataset.target;
+            const offset = parseFloat(btn.dataset.offset);
+            const input = document.getElementById(targetId);
+            input.value = (parseFloat(input.value) + offset).toFixed(3);
+        });
+    });
+    
+    // Quick cartesian offset buttons
+    document.querySelectorAll('.quick-offset').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const slot = parseInt(btn.dataset.slot);
+            const axis = btn.dataset.axis;
+            const delta = parseFloat(btn.dataset.delta);
+            applyQuickCartesianOffsetForSlot(slot, axis, delta);
+        });
+    });
 }
 
 // ============== Robot Management ==============
@@ -784,6 +827,36 @@ function sendTrigger(group, btn) {
     }, 200);
 }
 
+// Send roll holder open trigger pulse
+function sendRollHolderTrigger(btn) {
+    // Visual feedback - disable button briefly
+    btn.disabled = true;
+    btn.classList.add('triggering');
+    
+    if (state.socket && state.connected) {
+        state.socket.emit('send_roll_holder_trigger');
+    } else {
+        // Fallback to REST API
+        authFetch('/api/trigger/roll-holder', {
+            method: 'POST'
+        }).then(r => r.json()).then(data => {
+            if (!data.success) {
+                showNotification('Roll Holder trigger failed', 'error');
+            } else {
+                showNotification('Roll Holder opened', 'success');
+            }
+        }).catch(() => {
+            showNotification('Roll Holder trigger failed', 'error');
+        });
+    }
+    
+    // Re-enable after 200ms (trigger takes 100ms)
+    setTimeout(() => {
+        btn.disabled = false;
+        btn.classList.remove('triggering');
+    }, 200);
+}
+
 function syncJointsFromFeedback() {
     if (!state.selectedRobot || !state.robotStates[state.selectedRobot]) {
         showNotification('No feedback data available', 'warning');
@@ -1004,7 +1077,122 @@ function stopMotionForSlot(slot) {
     stopMotion();
 }
 
-// ============== UI Utilities ==============
+// ============== Cartesian Control ==============
+function getCartesianPoseForSlot(slot) {
+    const inputs = document.querySelector(`.cartesian-inputs[data-slot="${slot}"]`);
+    if (!inputs) return null;
+    
+    return {
+        position: {
+            x: parseFloat(inputs.querySelector(`#posX-slot-${slot}`).value) || 0,
+            y: parseFloat(inputs.querySelector(`#posY-slot-${slot}`).value) || 0,
+            z: parseFloat(inputs.querySelector(`#posZ-slot-${slot}`).value) || 0,
+        },
+        orientation: {
+            w: parseFloat(inputs.querySelector(`#orientW-slot-${slot}`).value) || 1,
+            x: parseFloat(inputs.querySelector(`#orientX-slot-${slot}`).value) || 0,
+            y: parseFloat(inputs.querySelector(`#orientY-slot-${slot}`).value) || 0,
+            z: parseFloat(inputs.querySelector(`#orientZ-slot-${slot}`).value) || 0,
+        }
+    };
+}
+
+function setCartesianPoseForSlot(slot, position, orientation) {
+    const inputs = document.querySelector(`.cartesian-inputs[data-slot="${slot}"]`);
+    if (!inputs) return;
+    
+    inputs.querySelector(`#posX-slot-${slot}`).value = position.x.toFixed(3);
+    inputs.querySelector(`#posY-slot-${slot}`).value = position.y.toFixed(3);
+    inputs.querySelector(`#posZ-slot-${slot}`).value = position.z.toFixed(3);
+    
+    inputs.querySelector(`#orientW-slot-${slot}`).value = orientation.w.toFixed(3);
+    inputs.querySelector(`#orientX-slot-${slot}`).value = orientation.x.toFixed(3);
+    inputs.querySelector(`#orientY-slot-${slot}`).value = orientation.y.toFixed(3);
+    inputs.querySelector(`#orientZ-slot-${slot}`).value = orientation.z.toFixed(3);
+}
+
+function sendCartesianCommandForSlot(slot) {
+    const robot = state.robotSlots[slot];
+    if (!robot) {
+        showNotification(`Please assign a robot to Slot ${slot}`, 'warning');
+        return;
+    }
+    
+    const pose = getCartesianPoseForSlot(slot);
+    if (!pose) return;
+    
+    if (state.socket && state.connected) {
+        state.socket.emit('send_cartesian_command', {
+            namespace: robot,
+            position: pose.position,
+            orientation: pose.orientation
+        });
+    } else {
+        // Fallback to REST API
+        authFetch(`/api/robot/${robot}/cartesian_command`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                position: pose.position,
+                orientation: pose.orientation
+            })
+        }).then(r => r.json()).then(data => {
+            if (data.success) {
+                showNotification(`Cartesian command sent to Slot ${slot}`, 'success');
+            } else {
+                showNotification(`Failed to send Cartesian command to Slot ${slot}`, 'error');
+            }
+        });
+    }
+}
+
+function syncCartesianFromFeedbackForSlot(slot) {
+    const robot = state.robotSlots[slot];
+    if (!robot) {
+        showNotification(`Please assign a robot to Slot ${slot}`, 'warning');
+        return;
+    }
+    
+    const robotState = state.robotStates[robot];
+    if (robotState && robotState.cartesian_pose) {
+        const pose = robotState.cartesian_pose;
+        setCartesianPoseForSlot(slot, pose.position, pose.orientation);
+        showNotification(`Synced Cartesian pose from Slot ${slot} feedback`, 'success');
+    } else {
+        showNotification(`No Cartesian feedback available for Slot ${slot}`, 'warning');
+    }
+}
+
+function applyQuickCartesianOffsetForSlot(slot, axis, delta) {
+    const robot = state.robotSlots[slot];
+    if (!robot) {
+        showNotification(`Please assign a robot to Slot ${slot}`, 'warning');
+        return;
+    }
+    
+    const positionOffset = { x: 0, y: 0, z: 0 };
+    positionOffset[axis] = delta;
+    
+    if (state.socket && state.connected) {
+        state.socket.emit('send_cartesian_offset', {
+            namespace: robot,
+            position_offset: positionOffset
+        });
+    } else {
+        // Fallback to REST API
+        authFetch(`/api/robot/${robot}/cartesian_offset`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ position_offset: positionOffset })
+        }).then(r => r.json()).then(data => {
+            if (data.success) {
+                showNotification(`Applied ${axis.toUpperCase()} offset: ${delta}m to Slot ${slot}`, 'success');
+            }
+        });
+    }
+}
+
+// ============== UI Utilities -->
 function formatNumber(value) {
     if (typeof value !== 'number' || isNaN(value)) return '--';
     return value.toFixed(CONFIG.DECIMAL_PLACES);

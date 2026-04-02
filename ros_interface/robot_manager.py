@@ -100,7 +100,7 @@ class RobotManager:
                     self._node.get_logger().error(f'Spin error: {e}')
     
     def _init_trigger_publishers(self):
-        """Initialize trigger publishers for Cheese groups"""
+        """Initialize trigger publishers for Cheese groups and Roll Holder"""
         qos_profile = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
             history=HistoryPolicy.KEEP_LAST,
@@ -112,7 +112,8 @@ class RobotManager:
             '/Cheese/group1',
             '/Cheese/group2',
             '/Cheese/group3',
-            '/Cheese/group4'
+            '/Cheese/group4',
+            '/RollHolder/open'
         ]
         
         for topic in trigger_topics:
@@ -131,6 +132,40 @@ class RobotManager:
             True if sent successfully
         """
         topic = f'/Cheese/group{group}'
+        
+        if topic not in self._trigger_publishers:
+            self._node.get_logger().error(f'Unknown trigger topic: {topic}')
+            return False
+        
+        pub = self._trigger_publishers[topic]
+        
+        # Send True
+        msg_true = Bool()
+        msg_true.data = True
+        pub.publish(msg_true)
+        self._node.get_logger().info(f'Trigger {topic}: True')
+        
+        # Schedule False after 100ms
+        def send_false():
+            time.sleep(0.1)  # 100ms delay
+            msg_false = Bool()
+            msg_false.data = False
+            pub.publish(msg_false)
+            self._node.get_logger().info(f'Trigger {topic}: False')
+        
+        # Run in separate thread to not block
+        threading.Thread(target=send_false, daemon=True).start()
+        
+        return True
+    
+    def send_roll_holder_trigger(self) -> bool:
+        """
+        Send a trigger pulse (True followed by False) to open the Roll Holder.
+        
+        Returns:
+            True if sent successfully
+        """
+        topic = '/RollHolder/open'
         
         if topic not in self._trigger_publishers:
             self._node.get_logger().error(f'Unknown trigger topic: {topic}')
