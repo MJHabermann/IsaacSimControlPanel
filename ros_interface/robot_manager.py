@@ -287,7 +287,7 @@ class RobotManager:
         Args:
             namespace: Robot namespace
             positions: Joint positions in radians
-            velocity: Joint velocity in rad/s (optional, default 0.01). Use 0.005 or less for slow motion
+            velocity: Joint velocity in rad/s (optional). Use 0.005 or less for slow motion
             
         Returns:
             True if sent successfully
@@ -295,8 +295,10 @@ class RobotManager:
         with self._lock:
             if namespace not in self._robots:
                 return False
+            # Convert single velocity to velocity list for each joint
+            velocities = [velocity] * len(positions) if velocity else None
             return self._robots[namespace]['publisher'].publish_joint_command(
-                positions, velocity=velocity
+                positions, velocities=velocities
             )
     
 
@@ -328,6 +330,25 @@ class RobotManager:
                 current_positions, offsets
             )
     
+    def send_cartesian_command(self, namespace: str, position: Dict[str, float], 
+                               orientation: Dict[str, float]) -> bool:
+        """
+        Send cartesian pose command to a robot.
+        
+        Args:
+            namespace: Robot namespace
+            position: Position dict with 'x', 'y', 'z' keys (meters)
+            orientation: Orientation dict with 'w', 'x', 'y', 'z' keys (quaternion)
+            
+        Returns:
+            True if sent successfully
+        """
+        with self._lock:
+            if namespace not in self._robots:
+                return False
+            return self._robots[namespace]['publisher'].publish_cartesian_command(
+                position, orientation
+            )
 
     
     def add_state_callback(self, callback: Callable):

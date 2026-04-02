@@ -353,18 +353,22 @@ function setupEventListeners() {
         });
     });
 
-    // Cartesian offset buttons for position inputs
+    // Cartesian offset buttons for position inputs (slot-specific)
     document.querySelectorAll('.cartesian-inputs .input-with-offset .btn-offset').forEach(btn => {
         btn.addEventListener('click', () => {
+            const slot = parseInt(btn.dataset.slot);
             const targetId = btn.dataset.target;
             const offset = parseFloat(btn.dataset.offset);
-            const input = document.getElementById(targetId);
-            input.value = (parseFloat(input.value) + offset).toFixed(3);
+            const inputId = `${targetId}-slot-${slot}`;
+            const input = document.getElementById(inputId);
+            if (input) {
+                input.value = (parseFloat(input.value) + offset).toFixed(3);
+            }
         });
     });
     
-    // Quick cartesian offset buttons
-    document.querySelectorAll('.quick-offset').forEach(btn => {
+    // Quick cartesian offset buttons (slot-aware)
+    document.querySelectorAll('.quick-offsets .btn-small').forEach(btn => {
         btn.addEventListener('click', () => {
             const slot = parseInt(btn.dataset.slot);
             const axis = btn.dataset.axis;
@@ -377,14 +381,27 @@ function setupEventListeners() {
 // ============== Robot Management ==============
 async function scanForRobots() {
     try {
+        console.log('[Scan] Starting robot scan...');
         const response = await authFetch('/api/robots/scan', { method: 'POST' });
-        const data = await response.json();
         
-        if (data.success && data.discovered.length > 0) {
+        console.log(`[Scan] Response status: ${response.status}`);
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`[Scan] HTTP ${response.status}: ${errorText}`);
+            showNotification(`Failed to scan: HTTP ${response.status}`, 'error');
+            return;
+        }
+        
+        const data = await response.json();
+        console.log('[Scan] Response data:', data);
+        
+        if (data.success && data.discovered && data.discovered.length > 0) {
             showNotification(`Found ${data.discovered.length} robot(s)`, 'success');
             
             // Add discovered robots
             for (const namespace of data.discovered) {
+                console.log(`[Scan] Adding discovered robot: ${namespace}`);
                 if (!state.robots.includes(namespace)) {
                     await addRobotByNamespace(namespace);
                 }
@@ -393,8 +410,8 @@ async function scanForRobots() {
             showNotification('No robots found', 'warning');
         }
     } catch (error) {
-        console.error('Scan error:', error);
-        showNotification('Failed to scan for robots', 'error');
+        console.error('[Scan] Error:', error);
+        showNotification(`Failed to scan for robots: ${error.message}`, 'error');
     }
 }
 
@@ -419,7 +436,17 @@ async function addRobotByNamespace(namespace) {
             body: JSON.stringify({ namespace })
         });
         
+        console.log(`[Robot Add] Response status: ${response.status} for namespace: ${namespace}`);
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`[Robot Add] HTTP ${response.status}: ${errorText}`);
+            showNotification(`Failed to add robot: HTTP ${response.status}`, 'error');
+            return;
+        }
+        
         const data = await response.json();
+        console.log(`[Robot Add] Response data:`, data);
         
         if (data.success) {
             if (!state.robots.includes(namespace)) {
@@ -439,8 +466,8 @@ async function addRobotByNamespace(namespace) {
             showNotification(`Failed to add robot: ${data.error || 'Unknown error'}`, 'error');
         }
     } catch (error) {
-        console.error('Add robot error:', error);
-        showNotification('Failed to add robot', 'error');
+        console.error('[Robot Add] Error:', error);
+        showNotification(`Failed to add robot: ${error.message}`, 'error');
     }
 }
 
@@ -558,6 +585,15 @@ function updateSlotAssignments() {
             }
         }
         
+        // Also update cartesian panel header
+        const cartLabel = document.querySelector(`.robot-slot-${slot}-cart`);
+        if (cartLabel) {
+            const displayText = robot ? robot : 'No robot assigned';
+            if (cartLabel.textContent !== displayText) {
+                cartLabel.textContent = displayText;
+            }
+        }
+        
         // Show/hide gripper section based on number of joints
         const slotPanel = document.querySelector(`.joint-control-panel[data-slot="${slot}"]`);
         if (slotPanel) {
@@ -618,6 +654,11 @@ function handleRobotStateUpdate(data) {
     // Track update rate
     state.updateCount++;
     
+    // Update feedback for the selected robot
+    if (namespace === state.selectedRobot) {
+        updateFeedbackDisplay(robotState);
+    }
+    
     // Update feedback for all slots where this robot is assigned
     for (let slot of [1, 2]) {
         if (state.robotSlots[slot] === namespace) {
@@ -631,15 +672,17 @@ function updateFeedbackDisplay(robotState) {
     const jointStates = robotState.joint_states;
     const tbody = document.getElementById('jointStatesBody');
     
-    if (jointStates.positions && jointStates.positions.length > 0) {
+    if (jointStates && jointStates.positions && jointStates.positions.length > 0) {
         tbody.innerHTML = jointStates.positions.map((pos, i) => {
             const name = jointStates.names[i] || `Joint ${i + 1}`;
+            const velocity = jointStates.velocities[i] ?? '--';
             const effort = jointStates.efforts[i] ?? '--';
             
             return `
                 <tr>
                     <td>${name}</td>
                     <td>${formatNumber(pos)}</td>
+                    <td>${typeof velocity === 'number' ? formatNumber(velocity) : velocity}</td>
                     <td>${typeof effort === 'number' ? formatNumber(effort) : effort}</td>
                 </tr>
             `;
@@ -648,7 +691,29 @@ function updateFeedbackDisplay(robotState) {
         // Update joint slider labels to match the actual joint names
         updateJointSliderLabels(jointStates.names);
     } else {
-        tbody.innerHTML = '<tr><td colspan="3" class="no-data">No joint data available</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="4" class="no-data">No joint data available</td></tr>';
+    }
+    
+    // Update Cartesian pose feedback if available
+    if (robotState.cartesian_pose) {
+        const pose = robotState.cartesian_pose;
+        
+        // Update position feedback
+        document.getElementById('fbPosX').textContent = formatNumber(pose.position.x);
+        document.getElementById('fbPosY').textContent = formatNumber(pose.position.y);
+        document.getElementById('fbPosZ').textContent = formatNumber(pose.position.z);
+        
+        // Update orientation feedback
+        document.getElementById('fbOrientW').textContent = formatNumber(pose.orientation.w);
+        document.getElementById('fbOrientX').textContent = formatNumber(pose.orientation.x);
+        document.getElementById('fbOrientY').textContent = formatNumber(pose.orientation.y);
+        document.getElementById('fbOrientZ').textContent = formatNumber(pose.orientation.z);
+        
+        // Update timestamp if available
+        if (pose.timestamp) {
+            const date = new Date(pose.timestamp);
+            document.getElementById('poseTimestamp').textContent = `Last update: ${date.toLocaleTimeString()}`;
+        }
     }
 }
 
@@ -658,6 +723,15 @@ function updateFeedbackDisplayForSlot(robotState, slot) {
     
     if (jointStates.names) {
         updateJointSliderLabels(jointStates.names, slot);
+    }
+    
+    // Update Cartesian pose feedback for this slot
+    if (robotState.cartesian_pose) {
+        const pose = robotState.cartesian_pose;
+        console.log(`Auto-syncing cartesian pose for slot ${slot}:`, pose);
+        setCartesianPoseForSlot(slot, pose.position, pose.orientation);
+    } else {
+        console.warn(`No cartesian_pose data in robot state for slot ${slot}. State:`, robotState);
     }
 }
 
@@ -1079,36 +1153,42 @@ function stopMotionForSlot(slot) {
 
 // ============== Cartesian Control ==============
 function getCartesianPoseForSlot(slot) {
-    const inputs = document.querySelector(`.cartesian-inputs[data-slot="${slot}"]`);
-    if (!inputs) return null;
-    
     return {
         position: {
-            x: parseFloat(inputs.querySelector(`#posX-slot-${slot}`).value) || 0,
-            y: parseFloat(inputs.querySelector(`#posY-slot-${slot}`).value) || 0,
-            z: parseFloat(inputs.querySelector(`#posZ-slot-${slot}`).value) || 0,
+            x: parseFloat(document.getElementById(`posX-slot-${slot}`).value) || 0,
+            y: parseFloat(document.getElementById(`posY-slot-${slot}`).value) || 0,
+            z: parseFloat(document.getElementById(`posZ-slot-${slot}`).value) || 0,
         },
         orientation: {
-            w: parseFloat(inputs.querySelector(`#orientW-slot-${slot}`).value) || 1,
-            x: parseFloat(inputs.querySelector(`#orientX-slot-${slot}`).value) || 0,
-            y: parseFloat(inputs.querySelector(`#orientY-slot-${slot}`).value) || 0,
-            z: parseFloat(inputs.querySelector(`#orientZ-slot-${slot}`).value) || 0,
+            w: parseFloat(document.getElementById(`orientW-slot-${slot}`).value) || 1,
+            x: parseFloat(document.getElementById(`orientX-slot-${slot}`).value) || 0,
+            y: parseFloat(document.getElementById(`orientY-slot-${slot}`).value) || 0,
+            z: parseFloat(document.getElementById(`orientZ-slot-${slot}`).value) || 0,
         }
     };
 }
 
 function setCartesianPoseForSlot(slot, position, orientation) {
-    const inputs = document.querySelector(`.cartesian-inputs[data-slot="${slot}"]`);
-    if (!inputs) return;
-    
-    inputs.querySelector(`#posX-slot-${slot}`).value = position.x.toFixed(3);
-    inputs.querySelector(`#posY-slot-${slot}`).value = position.y.toFixed(3);
-    inputs.querySelector(`#posZ-slot-${slot}`).value = position.z.toFixed(3);
-    
-    inputs.querySelector(`#orientW-slot-${slot}`).value = orientation.w.toFixed(3);
-    inputs.querySelector(`#orientX-slot-${slot}`).value = orientation.x.toFixed(3);
-    inputs.querySelector(`#orientY-slot-${slot}`).value = orientation.y.toFixed(3);
-    inputs.querySelector(`#orientZ-slot-${slot}`).value = orientation.z.toFixed(3);
+    try {
+        if (!position || !orientation) {
+            console.warn(`Cartesian pose data missing for slot ${slot}:`, {position, orientation});
+            return;
+        }
+        
+        document.getElementById(`posX-slot-${slot}`).value = (position.x || 0).toFixed(3);
+        document.getElementById(`posY-slot-${slot}`).value = (position.y || 0).toFixed(3);
+        document.getElementById(`posZ-slot-${slot}`).value = (position.z || 0).toFixed(3);
+        
+        document.getElementById(`orientW-slot-${slot}`).value = (orientation.w || 1).toFixed(3);
+        document.getElementById(`orientX-slot-${slot}`).value = (orientation.x || 0).toFixed(3);
+        document.getElementById(`orientY-slot-${slot}`).value = (orientation.y || 0).toFixed(3);
+        document.getElementById(`orientZ-slot-${slot}`).value = (orientation.z || 0).toFixed(3);
+        
+        console.log(`Cartesian pose synced for slot ${slot}:`, {position, orientation});
+    } catch (error) {
+        console.error(`Error setting cartesian pose for slot ${slot}:`, error);
+        showNotification(`Error syncing cartesian pose for slot ${slot}`, 'error');
+    }
 }
 
 function sendCartesianCommandForSlot(slot) {
@@ -1153,14 +1233,46 @@ function syncCartesianFromFeedbackForSlot(slot) {
         return;
     }
     
-    const robotState = state.robotStates[robot];
-    if (robotState && robotState.cartesian_pose) {
-        const pose = robotState.cartesian_pose;
-        setCartesianPoseForSlot(slot, pose.position, pose.orientation);
-        showNotification(`Synced Cartesian pose from Slot ${slot} feedback`, 'success');
-    } else {
-        showNotification(`No Cartesian feedback available for Slot ${slot}`, 'warning');
-    }
+    console.log(`Syncing cartesian feedback for slot ${slot}, robot: ${robot}`);
+    
+    // Try to fetch latest state from backend first
+    authFetch(`/api/robot/${robot}/state`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.success && data.state) {
+                // Update the state cache
+                state.robotStates[robot] = data.state;
+                console.log(`Fetched latest robot state:`, data.state);
+                
+                // Now try to sync cartesian
+                const robotState = data.state;
+                if (robotState && robotState.cartesian_pose) {
+                    const pose = robotState.cartesian_pose;
+                    console.log(`Setting pose from feedback:`, pose);
+                    setCartesianPoseForSlot(slot, pose.position, pose.orientation);
+                    showNotification(`Synced Cartesian pose from Slot ${slot} feedback`, 'success');
+                } else {
+                    console.warn(`No cartesian feedback in fetched state:`, robotState);
+                    showNotification(`No Cartesian feedback available for Slot ${slot}`, 'warning');
+                }
+            } else {
+                throw new Error('Failed to fetch robot state');
+            }
+        })
+        .catch(error => {
+            console.error(`Error fetching robot state for sync:`, error);
+            // Fallback to cached state
+            const robotState = state.robotStates[robot];
+            if (robotState && robotState.cartesian_pose) {
+                const pose = robotState.cartesian_pose;
+                console.log(`Using cached state, setting pose:`, pose);
+                setCartesianPoseForSlot(slot, pose.position, pose.orientation);
+                showNotification(`Synced Cartesian pose from Slot ${slot} (cached)`, 'success');
+            } else {
+                console.warn(`Fallback failed - no cached state`, robotState);
+                showNotification(`Unable to sync: No robot feedback available`, 'error');
+            }
+        });
 }
 
 function applyQuickCartesianOffsetForSlot(slot, axis, delta) {

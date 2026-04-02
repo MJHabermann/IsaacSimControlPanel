@@ -44,7 +44,10 @@ class Config:
     
     # Security settings
     # Allowed CORS origins (comma-separated, or 'localhost' for local only)
-    CORS_ORIGINS = os.environ.get('CORS_ORIGINS', 'localhost').split(',')
+    # Use '*' to allow all origins for local network HMI, or specify specific IPs
+    CORS_ORIGINS = os.environ.get('CORS_ORIGINS', '*').split(',')
+    # If using '*', note that CORS will allow all origins for local development
+    # For production on local networks, you may want to restrict to specific IPs
     
     # Authentication credentials (set via environment variables!)
     # Default admin password is 'changeme' - CHANGE THIS IN PRODUCTION
@@ -88,6 +91,9 @@ app.config.from_object(Config)
 def get_cors_origins():
     """Get list of allowed CORS origins"""
     origins = Config.CORS_ORIGINS
+    if '*' in origins:
+        # Allow all origins (local network HMI)
+        return '*'
     if 'localhost' in origins:
         # Expand localhost to common local development URLs
         return [
@@ -246,39 +252,81 @@ def get_robots():
 def scan_robots():
     """Scan for available robots"""
     manager = get_manager()
-    discovered = manager.scan_for_robots()
-    return jsonify({
-        'discovered': discovered,
-        'success': True
-    })
+    try:
+        discovered = manager.scan_for_robots()
+        app.logger.info(f'Robot scan completed. Found: {discovered}')
+        return jsonify({
+            'discovered': discovered,
+            'success': True
+        })
+    except Exception as e:
+        app.logger.error(f'Robot scan error: {e}')
+        return jsonify({
+            'discovered': [],
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
 @app.route('/api/robots/add', methods=['POST'])
 @login_required
 def add_robot():
     """Add a new robot to manage"""
-    data = request.get_json()
-    namespace = data.get('namespace')
-    num_joints = data.get('num_joints', 6)
-    joint_names = data.get('joint_names')
-    
-    if not namespace:
-        return jsonify({'success': False, 'error': 'Namespace required'}), 400
-    
-    # Check if this robot has a predefined configuration
-    if namespace in ROBOT_CONFIGS:
-        config = ROBOT_CONFIGS[namespace]
-        num_joints = config.get('num_joints', 6)
-        joint_names = config.get('joint_names')
-    
-    manager = get_manager()
-    success = manager.add_robot(namespace, num_joints, joint_names)
-    
-    return jsonify({
-        'success': success,
-        'namespace': namespace,
-        'num_joints': num_joints
-    })
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'No JSON data provided'}), 400
+        
+        namespace = data.get('namespace')
+        num_joints = data.get('num_joints', 6)
+        joint_names = data.get('joint_names')
+        
+        if not namespace:
+            return jsonify({'success': False, 'error': 'Namespace required'}), 400
+        
+        app.logger.info(f'Adding robot: {namespace} with {num_joints} joints')
+        
+        # Check if this robot has a predefined configuration
+        if namespace in ROBOT_CONFIGS:
+            config = ROBOT_CONFIGS[namespace]
+            num_joints = config.get('num_joints', 6)
+            joint_names = config.get('joint_names')
+            app.logger.info(f'Using predefined config for {namespace}')
+        
+        manager = get_manager()
+        success = manager.add_robot(namespace, num_joints, joint_names)
+        
+        if success:
+            app.logger.info(f'Successfully added robot: {namespace}')
+            return jsonify({
+                'success': True,
+                'namespace': namespace,
+                'num_joints': num_joints
+            })
+        else:
+            # Robot likely already exists - check if it's in the manager
+            if namespace in manager.get_robot_list():
+                app.logger.info(f'Robot {namespace} already exists in manager, returning success')
+                return jsonify({
+                    'success': True,
+                    'namespace': namespace,
+                    'num_joints': num_joints,
+                    'message': 'Robot already exists'
+                })
+            else:
+                app.logger.warning(f'Failed to add robot {namespace}')
+                return jsonify({
+                    'success': False,
+                    'error': 'Failed to add robot (ROS2 error)',
+                    'namespace': namespace
+                })
+            
+    except Exception as e:
+        app.logger.error(f'Error adding robot: {e}', exc_info=True)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
 @app.route('/api/robots/remove', methods=['POST'])
@@ -369,6 +417,65 @@ def send_joint_offset(namespace: str):
         'success': success,
         'namespace': namespace,
         'offsets': offsets
+    })
+
+
+@app.route('/api/robot/<namespace>/cartesian_command', methods=['POST'])
+@login_required
+def send_cartesian_command(namespace: str):
+    """Send cartesian pose command to a robot"""
+    data = request.get_json()
+    position = data.get('position', {})
+    orientation = data.get('orientation', {})
+    
+    if not position or not orientation:
+        return jsonify({'success': False, 'error': 'Position and orientation required'}), 400
+    
+    manager = get_manager()
+    success = manager.send_cartesian_command(namespace, position, orientation)
+    
+    return jsonify({
+        'success': success,
+        'namespace': namespace,
+        'position': position,
+        'orientation': orientation
+    })
+
+
+@app.route('/api/robot/<namespace>/cartesian_offset', methods=['POST'])
+@login_required
+def send_cartesian_offset(namespace: str):
+    """Send cartesian offset (delta position) to a robot"""
+    data = request.get_json()
+    position_offset = data.get('position_offset', {})
+    
+    if not position_offset:
+        return jsonify({'success': False, 'error': 'Position offset required'}), 400
+    
+    manager = get_manager()
+    # Get current cartesian pose
+    state = manager.get_robot_state(namespace)
+    if not state or not state.get('cartesian_pose'):
+        return jsonify({'success': False, 'error': 'Cannot get current cartesian pose'}), 400
+    
+    current_pose = state['cartesian_pose']
+    # Apply offset to current position
+    new_position = {
+        'x': current_pose['position']['x'] + position_offset.get('x', 0),
+        'y': current_pose['position']['y'] + position_offset.get('y', 0),
+        'z': current_pose['position']['z'] + position_offset.get('z', 0),
+    }
+    
+    # Keep orientation the same
+    orientation = current_pose['orientation']
+    
+    success = manager.send_cartesian_command(namespace, new_position, orientation)
+    
+    return jsonify({
+        'success': success,
+        'namespace': namespace,
+        'position_offset': position_offset,
+        'new_position': new_position
     })
 
 
@@ -483,6 +590,64 @@ def handle_joint_offset(data):
     })
 
 
+
+
+@socketio.on('send_cartesian_command')
+@authenticated_only
+def handle_cartesian_command(data):
+    """Handle cartesian command via WebSocket"""
+    namespace = data.get('namespace')
+    position = data.get('position', {})
+    orientation = data.get('orientation', {})
+    
+    manager = get_manager()
+    success = manager.send_cartesian_command(namespace, position, orientation)
+    
+    emit('command_result', {
+        'type': 'cartesian_command',
+        'success': success,
+        'namespace': namespace
+    })
+
+
+@socketio.on('send_cartesian_offset')
+@authenticated_only
+def handle_cartesian_offset(data):
+    """Handle cartesian offset via WebSocket"""
+    namespace = data.get('namespace')
+    position_offset = data.get('position_offset', {})
+    
+    manager = get_manager()
+    
+    # Get current cartesian pose
+    state = manager.get_robot_state(namespace)
+    if not state or not state.get('cartesian_pose'):
+        emit('command_result', {
+            'type': 'cartesian_offset',
+            'success': False,
+            'error': 'Cannot get current cartesian pose',
+            'namespace': namespace
+        })
+        return
+    
+    current_pose = state['cartesian_pose']
+    # Apply offset to current position
+    new_position = {
+        'x': current_pose['position']['x'] + position_offset.get('x', 0),
+        'y': current_pose['position']['y'] + position_offset.get('y', 0),
+        'z': current_pose['position']['z'] + position_offset.get('z', 0),
+    }
+    
+    # Keep orientation the same
+    orientation = current_pose['orientation']
+    
+    success = manager.send_cartesian_command(namespace, new_position, orientation)
+    
+    emit('command_result', {
+        'type': 'cartesian_offset',
+        'success': success,
+        'namespace': namespace
+    })
 
 
 

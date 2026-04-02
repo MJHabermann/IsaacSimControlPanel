@@ -12,7 +12,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import JointState
-from geometry_msgs.msg import Pose
+from example_interfaces.msg import Float64MultiArray
 
 
 @dataclass
@@ -67,9 +67,9 @@ class RobotSubscriber:
         self._lock = threading.Lock()
         self._callbacks: list[Callable] = []
         
-        # QoS profile for sensor data
+        # QoS profile for subscriptions - use RELIABLE for command feedback consistency
         qos_profile = QoSProfile(
-            reliability=ReliabilityPolicy.BEST_EFFORT,
+            reliability=ReliabilityPolicy.RELIABLE,
             history=HistoryPolicy.KEEP_LAST,
             depth=10
         )
@@ -85,14 +85,15 @@ class RobotSubscriber:
             qos_profile
         )
         
+        # Subscribe to Float64MultiArray for Cartesian pose feedback [x, y, z, w, qx, qy, qz]
         self._pose_sub = node.create_subscription(
-            Pose,
+            Float64MultiArray,
             pose_topic,
             self._cartesian_pose_callback,
             qos_profile
         )
         
-        node.get_logger().info(f'Subscribed to {joint_topic} and {pose_topic}')
+        node.get_logger().info(f'Subscribed to {joint_topic} and {pose_topic} (Float64MultiArray)')
     
     def _joint_states_callback(self, msg: JointState):
         """Handle incoming joint state messages"""
@@ -110,19 +111,28 @@ class RobotSubscriber:
             except Exception as e:
                 self.node.get_logger().error(f'Callback error: {e}')
     
-    def _cartesian_pose_callback(self, msg: Pose):
-        """Handle incoming Cartesian pose messages"""
+    def _cartesian_pose_callback(self, msg: Float64MultiArray):
+        """Handle incoming Cartesian pose messages as Float64MultiArray
+        Format: [x, y, z, w, qx, qy, qz]
+        """
+        # Ensure we have the expected 7 elements
+        if len(msg.data) < 7:
+            self.node.get_logger().warn(
+                f'Received incomplete cartesian pose array: {len(msg.data)} elements (expected 7)'
+            )
+            return
+        
         with self._lock:
             self._state.cartesian_position = {
-                'x': msg.position.x,
-                'y': msg.position.y,
-                'z': msg.position.z
+                'x': float(msg.data[0]),
+                'y': float(msg.data[1]),
+                'z': float(msg.data[2])
             }
             self._state.cartesian_orientation = {
-                'w': msg.orientation.w,
-                'x': msg.orientation.x,
-                'y': msg.orientation.y,
-                'z': msg.orientation.z
+                'w': float(msg.data[3]),
+                'x': float(msg.data[4]),
+                'y': float(msg.data[5]),
+                'z': float(msg.data[6])
             }
             self._state.cartesian_timestamp = datetime.now()
         
