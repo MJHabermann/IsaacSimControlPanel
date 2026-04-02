@@ -15,7 +15,9 @@ const CONFIG = {
 
 const MOTION_CONFIG = {
     SEND_RATE_HZ: 60,      // how often commands are sent (60Hz for smooth motion)
-    DEFAULT_DURATION: 4.0  // seconds to reach target (for interpolated mode)
+    DEFAULT_DURATION: 4.0, // seconds to reach target (for interpolated mode)
+    NORMAL_VELOCITY: 0.01, // rad/s for normal speed
+    SLOW_VELOCITY: 0.002   // rad/s for slow motion (5x slower)
 };
 
 // ============== Motion Control State ==============
@@ -220,6 +222,14 @@ function setupEventListeners() {
         if (e.key === 'Enter') addRobot();
     });
 
+    // Toggle joint sliders visibility
+    document.querySelectorAll('.toggle-joint-view').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const slot = parseInt(btn.dataset.slot);
+            toggleJointSliders(slot, btn);
+        });
+    });
+
     // Joint control - Slot-aware button listeners
     document.querySelectorAll('.sendJointCmd').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -376,6 +386,28 @@ function setupEventListeners() {
             applyQuickCartesianOffsetForSlot(slot, axis, delta);
         });
     });
+}
+
+// ============== Joint Sliders Toggle ==============
+function toggleJointSliders(slot, button) {
+    const panel = document.querySelector(`.joint-control-panel[data-slot="${slot}"]`);
+    const jointsContainer = panel.querySelector('.joint-sliders');
+    
+    const isHidden = jointsContainer.classList.contains('hidden');
+    
+    if (isHidden) {
+        // Show sliders
+        jointsContainer.classList.remove('hidden');
+        button.textContent = '👁️ Hide Sliders';
+        button.classList.remove('hiding-sliders');
+        button.classList.add('showing-sliders');
+    } else {
+        // Hide sliders
+        jointsContainer.classList.add('hidden');
+        button.textContent = '👁️‍🗨️ Show Sliders';
+        button.classList.remove('showing-sliders');
+        button.classList.add('hiding-sliders');
+    }
 }
 
 // ============== Robot Management ==============
@@ -947,7 +979,7 @@ function syncJointsFromFeedback() {
 }
 
 // Slot-aware command functions
-function sendJointCommandForSlot(slot) {
+function sendJointCommandForSlot(slot, velocity = null) {
     const robot = state.robotSlots[slot];
     if (!robot) {
         showNotification(`No robot assigned to Slot ${slot}`, 'warning');
@@ -959,14 +991,20 @@ function sendJointCommandForSlot(slot) {
     if (state.socket && state.connected) {
         state.socket.emit('send_joint_command', {
             namespace: robot,
-            positions
+            positions,
+            velocity: velocity
         });
     } else {
         // Fallback to REST API
+        const payload = { positions };
+        if (velocity !== null) {
+            payload.velocity = velocity;
+        }
+        
         authFetch(`/api/robot/${robot}/joint_command`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ positions })
+            body: JSON.stringify(payload)
         }).then(r => r.json()).then(data => {
             if (data.success) {
                 showNotification(`Joint command sent to ${robot}`, 'success');
@@ -1082,9 +1120,9 @@ function moveRollToConveyorForSlot(slot) {
         valueInput.value = targets[index].toFixed(3);
     });
     
-    // Send the joint command to the robot in this slot
-    sendJointCommandForSlot(slot);
-    showNotification('Move Roll to Conveyor command sent', 'success');
+    // Send the joint command to the robot in this slot with SLOW velocity
+    sendJointCommandForSlot(slot, MOTION_CONFIG.SLOW_VELOCITY);
+    showNotification('Move Roll to Conveyor command sent (slow speed)', 'success');
     return;
 
     // Interpolated mode: Gradually send intermediate positions

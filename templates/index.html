@@ -31,21 +31,24 @@
             <!-- Trigger Panel -->
             <section class="panel trigger-panel">
                 <div class="panel-header">
-                    <h2>Cheese Triggers</h2>
+                    <h2>Stopper Droppers</h2>
                 </div>
                 <div class="panel-content">
                     <div class="trigger-buttons">
                         <button class="btn btn-trigger" id="triggerG1" data-group="1">
-                            <span class="trigger-label">Trigger G1</span>
+                            <span class="trigger-label">Dropper G1</span>
                         </button>
                         <button class="btn btn-trigger" id="triggerG2" data-group="2">
-                            <span class="trigger-label">Trigger G2</span>
+                            <span class="trigger-label">Dropper G2</span>
                         </button>
                         <button class="btn btn-trigger" id="triggerG3" data-group="3">
-                            <span class="trigger-label">Trigger G3</span>
+                            <span class="trigger-label">Dropper G3</span>
                         </button>
                         <button class="btn btn-trigger" id="triggerG4" data-group="4">
-                            <span class="trigger-label">Trigger G4</span>
+                            <span class="trigger-label">Dropper G4</span>
+                        </button>
+                        <button class="btn btn-trigger" id="triggerG5" data-group="5">
+                            <span class="trigger-label">Dropper G5</span>
                         </button>
                     </div>
                 </div>
@@ -90,7 +93,10 @@
                 <!-- Joint Control Panel - Robot Slot 1 -->
                 <section class="panel joint-control-panel" data-robot="null" data-slot="1">
                     <div class="panel-header">
-                        <h2>Joint Control - Slot 1</h2>
+                        <div style="display: flex; align-items: center; gap: 1rem; flex: 1;">
+                            <h2>Joint Control - Slot 1</h2>
+                            <button class="btn btn-secondary toggle-joint-view" data-slot="1" title="Toggle joint sliders visibility" style="padding: 0.5rem 0.75rem; font-size: 0.75rem;">👁️ Hide Sliders</button>
+                        </div>
                         <span class="selected-robot robot-slot-1">No robot assigned</span>
                     </div>
                     <div class="panel-content">
@@ -259,7 +265,10 @@
                 <!-- Joint Control Panel - Robot Slot 2 -->
                 <section class="panel joint-control-panel" data-robot="null" data-slot="2">
                     <div class="panel-header">
-                        <h2>Joint Control - Slot 2</h2>
+                        <div style="display: flex; align-items: center; gap: 1rem; flex: 1;">
+                            <h2>Joint Control - Slot 2</h2>
+                            <button class="btn btn-secondary toggle-joint-view" data-slot="2" title="Toggle joint sliders visibility" style="padding: 0.5rem 0.75rem; font-size: 0.75rem;">👁️ Hide Sliders</button>
+                        </div>
                         <span class="selected-robot robot-slot-2">No robot assigned</span>
                     </div>
                     <div class="panel-content">

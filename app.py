@@ -485,9 +485,9 @@ def send_cartesian_offset(namespace: str):
 @app.route('/api/trigger/<int:group>', methods=['POST'])
 @login_required
 def send_trigger(group: int):
-    """Send trigger pulse to a Cheese group"""
-    if group < 1 or group > 4:
-        return jsonify({'success': False, 'error': 'Group must be 1-4'}), 400
+    """Send trigger pulse to a Stopper group"""
+    if group < 1 or group > 5:
+        return jsonify({'success': False, 'error': 'Group must be 1-5'}), 400
     
     manager = get_manager()
     success = manager.send_trigger(group)
@@ -657,7 +657,7 @@ def handle_trigger(data):
     """Handle trigger command via WebSocket"""
     group = data.get('group')
     
-    if not isinstance(group, int) or group < 1 or group > 4:
+    if not isinstance(group, int) or group < 1 or group > 5:
         emit('command_result', {
             'type': 'trigger',
             'success': False,
