@@ -78,12 +78,13 @@
                 <!-- Roll Holder Panel -->
                 <section class="panel roll-holder-panel">
                     <div class="panel-header">
-                        <h2>Roll Holder</h2>
+                        <h2>Holder and Door Controls</h2>
                     </div>
                     <div class="panel-content">
                         <!-- Roll holder controls -->
                         <div class="roll-holder-controls">
                             <button class="btn btn-roll" id="rollHolderOpenBtn">Open Roll Holder</button>
+                            <button class="btn btn-roll" id="cutterDoorBtn">Open Cutter Door</button>
                         </div>
                     </div>
                 </section>
@@ -168,6 +169,11 @@
                                     <button class="btn-offset gripper-offset" data-offset="0.01">+</button>
                                 </div>
                                 <input type="number" class="gripper-value" step="0.001" value="0" /> rad
+                                <div class="gripper-preset-buttons">
+                                    <button class="btn btn-small gripper-preset" data-preset="0.0" data-slot="1">Open</button>
+                                    <button class="btn btn-small gripper-preset" data-preset="0.6" data-slot="1">Grip</button>
+                                    <button class="btn btn-small gripper-preset" data-preset="1.0" data-slot="1">Close</button>
+                                </div>
                             </div>
                         </div>
                         <div class="control-buttons">
@@ -340,6 +346,11 @@
                                     <button class="btn-offset gripper-offset" data-offset="0.01">+</button>
                                 </div>
                                 <input type="number" class="gripper-value" step="0.001" value="0" /> rad
+                                <div class="gripper-preset-buttons">
+                                    <button class="btn btn-small gripper-preset" data-preset="0.0" data-slot="2">Open</button>
+                                    <button class="btn btn-small gripper-preset" data-preset="0.6" data-slot="2">Grip</button>
+                                    <button class="btn btn-small gripper-preset" data-preset="1.0" data-slot="2">Close</button>
+                                </div>
                             </div>
                         </div>
                         <div class="control-buttons">

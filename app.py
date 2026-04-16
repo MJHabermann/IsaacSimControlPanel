@@ -511,6 +511,19 @@ def send_roll_holder_trigger():
     })
 
 
+@app.route('/api/trigger/cutter-door', methods=['POST'])
+@login_required
+def send_cutter_door_trigger():
+    """Send trigger pulse to open Cutter Door"""
+    manager = get_manager()
+    success = manager.send_cutter_door_trigger()
+
+    return jsonify({
+        'success': success,
+        'action': 'open_cutter_door'
+    })
+
+
 # ============== WebSocket Events ==============
 
 @socketio.on('connect')
@@ -686,6 +699,20 @@ def handle_roll_holder_trigger():
         'type': 'roll_holder_trigger',
         'success': success,
         'action': 'open_roll_holder'
+    })
+
+
+@socketio.on('send_cutter_door_trigger')
+@authenticated_only
+def handle_cutter_door_trigger():
+    """Handle cutter door trigger command via WebSocket"""
+    manager = get_manager()
+    success = manager.send_cutter_door_trigger()
+
+    emit('command_result', {
+        'type': 'cutter_door_trigger',
+        'success': success,
+        'action': 'open_cutter_door'
     })
 
 

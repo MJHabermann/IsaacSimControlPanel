@@ -57,7 +57,7 @@ class RobotManager:
         self._state_callbacks: List[Callable] = []
         self._command_queue = queue.Queue()
         
-        # Trigger publishers for Cheese groups
+        # Trigger publishers for Stopper groups
         self._trigger_publishers: Dict[str, Any] = {}
         
         # Initialize ROS2
@@ -100,7 +100,7 @@ class RobotManager:
                     self._node.get_logger().error(f'Spin error: {e}')
     
     def _init_trigger_publishers(self):
-        """Initialize trigger publishers for Cheese groups and Roll Holder"""
+        """Initialize trigger publishers for Stopper groups, Roll Holder, and Cutter Door"""
         qos_profile = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
             history=HistoryPolicy.KEEP_LAST,
@@ -113,7 +113,9 @@ class RobotManager:
             '/Cheese/group2',
             '/Cheese/group3',
             '/Cheese/group4',
-            '/RollHolder/open'
+            '/Cheese/group5',
+            '/RollHolder/open',
+            '/Door/Door'
         ]
         
         for topic in trigger_topics:
@@ -123,10 +125,10 @@ class RobotManager:
     
     def send_trigger(self, group: int) -> bool:
         """
-        Send a trigger pulse (True followed by False) to a Cheese group.
+        Send a trigger pulse (True followed by False) to a Stopper group.
         
         Args:
-            group: Group number (1-4)
+            group: Group number (1-5)
             
         Returns:
             True if sent successfully
@@ -190,6 +192,40 @@ class RobotManager:
         # Run in separate thread to not block
         threading.Thread(target=send_false, daemon=True).start()
         
+        return True
+
+    def send_cutter_door_trigger(self) -> bool:
+        """
+        Send a trigger pulse (True followed by False) to open the Cutter Door.
+
+        Returns:
+            True if sent successfully
+        """
+        topic = '/Door/Door'
+
+        if topic not in self._trigger_publishers:
+            self._node.get_logger().error(f'Unknown trigger topic: {topic}')
+            return False
+
+        pub = self._trigger_publishers[topic]
+
+        # Send True
+        msg_true = Bool()
+        msg_true.data = True
+        pub.publish(msg_true)
+        self._node.get_logger().info(f'Trigger {topic}: True')
+
+        # Schedule False after 100ms
+        def send_false():
+            time.sleep(0.1)  # 100ms delay
+            msg_false = Bool()
+            msg_false.data = False
+            pub.publish(msg_false)
+            self._node.get_logger().info(f'Trigger {topic}: False')
+
+        # Run in separate thread to not block
+        threading.Thread(target=send_false, daemon=True).start()
+
         return True
     
     def add_robot(self, namespace: str, num_joints: int = 6, 

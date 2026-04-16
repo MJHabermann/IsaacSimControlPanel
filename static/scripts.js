@@ -322,6 +322,18 @@ function setupEventListeners() {
                 valueInput.value = newValue.toFixed(3);
             });
         });
+        
+        // Preset buttons for gripper (Open, Grip, Close)
+        group.querySelectorAll('.gripper-preset').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const presetValue = parseFloat(btn.dataset.preset);
+                const slot = parseInt(btn.dataset.slot);
+                slider.value = presetValue;
+                valueInput.value = presetValue.toFixed(3);
+                // Send the command immediately
+                setTimeout(() => sendJointCommandForSlot(slot), 100);
+            });
+        });
     });
     
     // Auto-refresh toggle
@@ -345,6 +357,14 @@ function setupEventListeners() {
     if (rollHolderBtn) {
         rollHolderBtn.addEventListener('click', () => {
             sendRollHolderTrigger(rollHolderBtn);
+        });
+    }
+
+    // Cutter Door button
+    const cutterDoorBtn = document.getElementById('cutterDoorBtn');
+    if (cutterDoorBtn) {
+        cutterDoorBtn.addEventListener('click', () => {
+            sendCutterDoorTrigger(cutterDoorBtn);
         });
     }
 
@@ -963,6 +983,36 @@ function sendRollHolderTrigger(btn) {
     }, 200);
 }
 
+// Send cutter door open trigger pulse
+function sendCutterDoorTrigger(btn) {
+    // Visual feedback - disable button briefly
+    btn.disabled = true;
+    btn.classList.add('triggering');
+
+    if (state.socket && state.connected) {
+        state.socket.emit('send_cutter_door_trigger');
+    } else {
+        // Fallback to REST API
+        authFetch('/api/trigger/cutter-door', {
+            method: 'POST'
+        }).then(r => r.json()).then(data => {
+            if (!data.success) {
+                showNotification('Cutter Door trigger failed', 'error');
+            } else {
+                showNotification('Cutter Door opened', 'success');
+            }
+        }).catch(() => {
+            showNotification('Cutter Door trigger failed', 'error');
+        });
+    }
+
+    // Re-enable after 200ms (trigger takes 100ms)
+    setTimeout(() => {
+        btn.disabled = false;
+        btn.classList.remove('triggering');
+    }, 200);
+}
+
 function syncJointsFromFeedback() {
     if (!state.selectedRobot || !state.robotStates[state.selectedRobot]) {
         showNotification('No feedback data available', 'warning');
@@ -1070,7 +1120,7 @@ function readyToRollForSlot(slot) {
     const slotPanel = document.querySelector(`.joint-control-panel[data-slot="${slot}"]`);
     if (!slotPanel) return;
     
-    const positions = [0, 0.30, -0.5, 0, -0.5];  // Default ready to roll positions
+    const positions = [0, 0.13, -0.41, -0.02, -0.83];  // Default ready to roll positions
     slotPanel.querySelectorAll('.joint-slider-group').forEach((group, index) => {
         if (index < positions.length) {
             const slider = group.querySelector('.joint-slider');
@@ -1106,8 +1156,8 @@ function moveRollToConveyorForSlot(slot) {
     // Target joint values for move to conveyor
     const targets = [];
     jointGroups.forEach((_, index) => {
-        if (index === 1) targets[index] = -0.5;
-        else if (index === 2) targets[index] = 0.5;
+        if (index === 1) targets[index] = -0.36;
+        else if (index === 2) targets[index] = 0.46;
         else if (index === 4) targets[index] = -0.5;
         else targets[index] = 0;
     });
