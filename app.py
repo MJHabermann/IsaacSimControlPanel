@@ -524,6 +524,39 @@ def send_cutter_door_trigger():
     })
 
 
+@app.route('/api/paper-translation/<int:paper>', methods=['POST'])
+@login_required
+def send_paper_translation(paper: int):
+    """Send trigger pulse to translate a paper roll"""
+    if paper < 1 or paper > 5:
+        return jsonify({'success': False, 'error': 'Paper must be 1-5'}), 400
+
+    manager = get_manager()
+    success = manager.send_paper_translation(paper)
+
+    return jsonify({
+        'success': success,
+        'paper': paper
+    })
+
+
+@app.route('/api/trigger/conveyor-all/<int:value>', methods=['POST'])
+@login_required
+def set_conveyor_all_state(value: int):
+    """Set conveyor state for Conveyor1/2/3 (1=on, 0=off)"""
+    if value not in [0, 1]:
+        return jsonify({'success': False, 'error': 'Value must be 0 or 1'}), 400
+
+    manager = get_manager()
+    success = manager.set_conveyor_all_state(value == 1)
+
+    return jsonify({
+        'success': success,
+        'action': 'conveyor_all_state',
+        'value': value
+    })
+
+
 # ============== WebSocket Events ==============
 
 @socketio.on('connect')
@@ -713,6 +746,70 @@ def handle_cutter_door_trigger():
         'type': 'cutter_door_trigger',
         'success': success,
         'action': 'open_cutter_door'
+    })
+
+
+@socketio.on('send_paper_translation')
+@authenticated_only
+def handle_paper_translation(data):
+    """Handle paper translation command via WebSocket"""
+    paper = data.get('paper')
+
+    if not isinstance(paper, int) or paper < 1 or paper > 5:
+        emit('command_result', {
+            'type': 'paper_translation',
+            'success': False,
+            'error': 'Invalid paper number'
+        })
+        return
+
+    manager = get_manager()
+    success = manager.send_paper_translation(paper)
+
+    emit('command_result', {
+        'type': 'paper_translation',
+        'success': success,
+        'paper': paper
+    })
+
+
+@socketio.on('send_conveyor_all_state')
+@authenticated_only
+def handle_conveyor_all_state(data):
+    """Handle conveyor state command via WebSocket"""
+    value = data.get('value')
+
+    if not isinstance(value, int) or value not in [0, 1]:
+        emit('command_result', {
+            'type': 'conveyor_all_state',
+            'success': False,
+            'error': 'Value must be 0 or 1'
+        })
+        return
+
+    manager = get_manager()
+    success = manager.set_conveyor_all_state(value == 1)
+
+    emit('command_result', {
+        'type': 'conveyor_all_state',
+        'success': success,
+        'action': 'conveyor_all_state',
+        'value': value
+    })
+
+
+@socketio.on('send_conveyor_all_trigger')
+@authenticated_only
+def handle_conveyor_all_trigger_legacy():
+    """Backward-compatible legacy event: defaults to ON"""
+    manager = get_manager()
+    success = manager.set_conveyor_all_state(True)
+
+    emit('command_result', {
+        'type': 'conveyor_all_state',
+        'success': success,
+        'action': 'conveyor_all_state',
+        'value': 1
     })
 
 

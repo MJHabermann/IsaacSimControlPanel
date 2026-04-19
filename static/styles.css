@@ -208,24 +208,30 @@ body {
 .roll-holder-panel {
     grid-column: 2;
     grid-row: 2;
-    max-height: 200px;
+    max-height: none;
+    min-height: 220px;
     display: flex;
     flex-direction: column;
 }
 
 .roll-holder-panel .panel-content {
     display: flex;
-    align-items: center;
-    justify-content: center;
+    align-items: stretch;
+    justify-content: flex-start;
     flex: 1;
-    min-height: 120px;
+    min-height: 0;
 }
 
 .roll-holder-controls {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
+    flex-wrap: wrap;
     gap: var(--spacing-md);
     width: 100%;
+}
+
+.roll-holder-controls .btn {
+    flex: 1 1 220px;
 }
 
 .btn-roll {
@@ -300,7 +306,7 @@ body {
     grid-template-columns: 1fr 1fr;
     gap: var(--spacing-lg);
     grid-column: 2;
-    grid-row: 3 / 5;
+    grid-row: 3;
 }
 
 .selected-robot {

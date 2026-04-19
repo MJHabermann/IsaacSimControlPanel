@@ -100,7 +100,7 @@ class RobotManager:
                     self._node.get_logger().error(f'Spin error: {e}')
     
     def _init_trigger_publishers(self):
-        """Initialize trigger publishers for Stopper groups, Roll Holder, and Cutter Door"""
+        """Initialize trigger publishers for Stopper groups, Roll Holder, Cutter Door, Paper Translation, and Conveyors"""
         qos_profile = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
             history=HistoryPolicy.KEEP_LAST,
@@ -115,7 +115,15 @@ class RobotManager:
             '/Cheese/group4',
             '/Cheese/group5',
             '/RollHolder/open',
-            '/Door/Door'
+            '/Door/Door',
+            '/Roll1/Paper1',
+            '/Roll2/Paper2',
+            '/Roll3/Paper3',
+            '/Roll4/Paper4',
+            '/Roll5/Paper5',
+            '/Conveyor/Conveyor1',
+            '/Conveyor/Conveyor2',
+            '/Conveyor/Conveyor3'
         ]
         
         for topic in trigger_topics:
@@ -225,6 +233,70 @@ class RobotManager:
 
         # Run in separate thread to not block
         threading.Thread(target=send_false, daemon=True).start()
+
+        return True
+
+    def send_paper_translation(self, paper: int) -> bool:
+        """
+        Send a trigger pulse (True followed by False) to translate a paper roll.
+
+        Args:
+            paper: Paper/Roll number (1-5)
+
+        Returns:
+            True if sent successfully
+        """
+        topic = f'/Roll{paper}/Paper{paper}'
+
+        if topic not in self._trigger_publishers:
+            self._node.get_logger().error(f'Unknown trigger topic: {topic}')
+            return False
+
+        pub = self._trigger_publishers[topic]
+
+        msg_true = Bool()
+        msg_true.data = True
+        pub.publish(msg_true)
+        self._node.get_logger().info(f'Trigger {topic}: True')
+
+        def send_false():
+            time.sleep(0.1)
+            msg_false = Bool()
+            msg_false.data = False
+            pub.publish(msg_false)
+            self._node.get_logger().info(f'Trigger {topic}: False')
+
+        threading.Thread(target=send_false, daemon=True).start()
+
+        return True
+
+    def set_conveyor_all_state(self, enabled: bool) -> bool:
+        """
+        Set all conveyor topics to the requested boolean state.
+
+        Args:
+            enabled: True to turn conveyors on, False to turn conveyors off
+
+        Returns:
+            True if sent successfully
+        """
+        topics = [
+            '/Conveyor/Conveyor1',
+            '/Conveyor/Conveyor2',
+            '/Conveyor/Conveyor3'
+        ]
+
+        for topic in topics:
+            if topic not in self._trigger_publishers:
+                self._node.get_logger().error(f'Unknown trigger topic: {topic}')
+                return False
+
+        for topic in topics:
+            pub = self._trigger_publishers[topic]
+            msg = Bool()
+            msg.data = enabled
+            pub.publish(msg)
+            self._node.get_logger().info(f'Conveyor state {topic}: {enabled}')
 
         return True
     

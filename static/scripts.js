@@ -20,6 +20,20 @@ const MOTION_CONFIG = {
     SLOW_VELOCITY: 0.002   // rad/s for slow motion (5x slower)
 };
 
+const SEQUENCE_CONFIG = {
+    CUTTER_TO_HOLDER_DELAY_MS: 18000,
+    HOLDER_TO_WEDGE_DELAY_MS: 8000,
+    WEDGE_TO_MOVE_DELAY_MS: 3000,
+    MOVE_TO_CONVEYOR_START_DELAY_MS: 14000,
+    CONVEYOR_RUN_TIME_MS: 10000
+};
+
+const automationState = {
+    isRunning: false,
+    stopRequested: false,
+    sequenceId: 0
+};
+
 // ============== Motion Control State ==============
 const motionState = {
     isMoving: false,
@@ -367,6 +381,46 @@ function setupEventListeners() {
             sendCutterDoorTrigger(cutterDoorBtn);
         });
     }
+
+    // Conveyor state buttons
+    document.querySelectorAll('.conveyor-state-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const value = parseInt(btn.dataset.state);
+            sendConveyorAllState(value, btn);
+        });
+    });
+
+    // One-click sequential production macro
+    const autoSequenceBtn = document.getElementById('autoSequenceBtn');
+    if (autoSequenceBtn) {
+        autoSequenceBtn.addEventListener('click', () => {
+            runFullProductionSequence(autoSequenceBtn);
+        });
+    }
+
+    // Door + holder only macro
+    const doorHolderOnlyBtn = document.getElementById('doorHolderOnlyBtn');
+    if (doorHolderOnlyBtn) {
+        doorHolderOnlyBtn.addEventListener('click', () => {
+            runDoorAndHolderOnlySequence(doorHolderOnlyBtn);
+        });
+    }
+
+    // Stop automation button
+    const stopAutomationBtn = document.getElementById('stopAutomationBtn');
+    if (stopAutomationBtn) {
+        stopAutomationBtn.addEventListener('click', () => {
+            stopAutomationSequence(stopAutomationBtn);
+        });
+    }
+
+    // Paper Translation buttons
+    document.querySelectorAll('.translation-buttons button').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const paper = parseInt(btn.dataset.paper);
+            sendPaperTranslation(paper, btn);
+        });
+    });
 
     // Cartesian control - Slot-aware button listeners
     document.querySelectorAll('.sendCartesianCmd').forEach(btn => {
@@ -1013,6 +1067,302 @@ function sendCutterDoorTrigger(btn) {
     }, 200);
 }
 
+// Send paper translation trigger pulse
+function sendPaperTranslation(paper, btn) {
+    btn.disabled = true;
+    btn.classList.add('triggering');
+
+    if (state.socket && state.connected) {
+        state.socket.emit('send_paper_translation', { paper });
+    } else {
+        authFetch(`/api/paper-translation/${paper}`, {
+            method: 'POST'
+        }).then(r => r.json()).then(data => {
+            if (!data.success) {
+                showNotification(`Paper ${paper} translation failed`, 'error');
+            } else {
+                showNotification(`Paper ${paper} translated`, 'success');
+            }
+        }).catch(() => {
+            showNotification(`Paper ${paper} translation failed`, 'error');
+        });
+    }
+
+    setTimeout(() => {
+        btn.disabled = false;
+        btn.classList.remove('triggering');
+    }, 200);
+}
+
+// Set Conveyor1/2/3 state together (1=on, 0=off)
+function sendConveyorAllState(value, btn) {
+    btn.disabled = true;
+    btn.classList.add('triggering');
+
+    if (state.socket && state.connected) {
+        state.socket.emit('send_conveyor_all_state', { value });
+    } else {
+        authFetch(`/api/trigger/conveyor-all/${value}`, {
+            method: 'POST'
+        }).then(r => r.json()).then(data => {
+            if (!data.success) {
+                showNotification(`Conveyor command ${value} failed`, 'error');
+            } else {
+                showNotification(`Conveyor 1/2/3 set to ${value}`, 'success');
+            }
+        }).catch(() => {
+            showNotification(`Conveyor command ${value} failed`, 'error');
+        });
+    }
+
+    setTimeout(() => {
+        btn.disabled = false;
+        btn.classList.remove('triggering');
+    }, 200);
+}
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function startAutomationSequence() {
+    if (automationState.isRunning) {
+        showNotification('An automation sequence is already running', 'warning');
+        return null;
+    }
+
+    automationState.isRunning = true;
+    automationState.stopRequested = false;
+    automationState.sequenceId += 1;
+    return automationState.sequenceId;
+}
+
+function stopAutomationSequence(btn = null) {
+    automationState.stopRequested = true;
+    if (motionState.isMoving) {
+        stopMotion();
+    }
+
+    if (btn) {
+        btn.disabled = true;
+        setTimeout(() => {
+            btn.disabled = false;
+        }, 500);
+    }
+
+    showNotification('Automation stop requested', 'warning');
+}
+
+async function waitForAutomationDelay(ms, sequenceId) {
+    const stepMs = 250;
+    let elapsed = 0;
+
+    while (elapsed < ms) {
+        if (automationState.stopRequested || automationState.sequenceId !== sequenceId) {
+            throw new Error('automation_stopped');
+        }
+
+        const remaining = ms - elapsed;
+        await sleep(Math.min(stepMs, remaining));
+        elapsed += stepMs;
+    }
+}
+
+async function runDoorAndHolderOnlySequence(btn) {
+    const sequenceId = startAutomationSequence();
+    if (!sequenceId) return;
+
+    const cutterDoorBtn = document.getElementById('cutterDoorBtn');
+    const rollHolderBtn = document.getElementById('rollHolderOpenBtn');
+    const dropperG1Btn = document.getElementById('triggerG1');
+
+    if (!cutterDoorBtn || !rollHolderBtn) {
+        automationState.isRunning = false;
+        showNotification('Door/holder controls are not available in UI', 'error');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.classList.add('triggering');
+    showNotification('Running door + holder only sequence...', 'info');
+
+    try {
+        sendCutterDoorTrigger(cutterDoorBtn);
+        await waitForAutomationDelay(SEQUENCE_CONFIG.CUTTER_TO_HOLDER_DELAY_MS, sequenceId);
+
+        sendRollHolderTrigger(rollHolderBtn);
+        showNotification('Door + holder sequence completed', 'success');
+
+        // await waitForAutomationDelay(SEQUENCE_CONFIG.HOLDER_TO_WEDGE_DELAY_MS, sequenceId);
+
+        // // 4) Dropper G1, wait 3s, then move to conveyor
+        // sendTrigger(1, dropperG1Btn);
+    } catch (error) {
+        if (error.message === 'automation_stopped') {
+            showNotification('Door + holder sequence stopped', 'warning');
+        } else {
+            console.error('Door + holder sequence failed:', error);
+            showNotification('Door + holder sequence failed', 'error');
+        }
+    } finally {
+        automationState.isRunning = false;
+        btn.disabled = false;
+        btn.classList.remove('triggering');
+    }
+}
+
+async function runFullProductionSequence(btn) {
+    const sequenceId = startAutomationSequence();
+    if (!sequenceId) return;
+
+    const slotRobot = state.robotSlots[1];
+    if (!slotRobot) {
+        automationState.isRunning = false;
+        showNotification('Slot 1 needs a robot before running sequence', 'warning');
+        return;
+    }
+
+    const cutterDoorBtn = document.getElementById('cutterDoorBtn');
+    const rollHolderBtn = document.getElementById('rollHolderOpenBtn');
+    const translationRoll2Btn = document.getElementById('translationRoll2');
+    const translationRoll3Btn = document.getElementById('translationRoll3');
+    const translationRoll4Btn = document.getElementById('translationRoll4');
+    const translationRoll5Btn = document.getElementById('translationRoll5');
+    const dropperG1Btn = document.getElementById('triggerG1');
+    const dropperG2Btn = document.getElementById('triggerG2');
+    const dropperG3Btn = document.getElementById('triggerG3');
+    const dropperG4Btn = document.getElementById('triggerG4');
+    const dropperG5Btn = document.getElementById('triggerG5');
+    const conveyorOnBtn = document.getElementById('conveyorAllOnBtn');
+    const conveyorOffBtn = document.getElementById('conveyorAllOffBtn');
+
+    if (!cutterDoorBtn || !rollHolderBtn || !translationRoll2Btn || !translationRoll3Btn || !translationRoll4Btn || !translationRoll5Btn || !dropperG1Btn || !dropperG2Btn || !dropperG3Btn || !dropperG4Btn || !dropperG5Btn || !conveyorOnBtn || !conveyorOffBtn) {
+        automationState.isRunning = false;
+        showNotification('Sequence controls are not available in UI', 'error');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.classList.add('triggering');
+    showNotification('Running full sequence...', 'info');
+
+    // Conveyor runtime increases by 4s on each subsequent conveyor cycle (doubled timing).
+    let conveyorRunDurationMs = 10000;
+    const conveyorIncrementMs = 4000;
+
+    try {
+        // 1) Open cutter door, then 14s delay
+        sendCutterDoorTrigger(cutterDoorBtn);
+        await waitForAutomationDelay(SEQUENCE_CONFIG.CUTTER_TO_HOLDER_DELAY_MS, sequenceId);
+
+        // 2) Open roll holder
+        sendRollHolderTrigger(rollHolderBtn);
+
+        // 3) Immediately send Slot 1 to Ready to Roll during holder->wedge wait window
+        await waitForAutomationDelay(10000, sequenceId);
+        readyToRollForSlot(1);
+
+        // Keep roll translation command in the same window
+        // sendPaperTranslation(1, translationRoll1Btn);
+
+        // Wait before lowering wedge
+        await waitForAutomationDelay(SEQUENCE_CONFIG.HOLDER_TO_WEDGE_DELAY_MS, sequenceId);
+
+        // 4) Dropper G1, wait 3s, then move to conveyor
+        sendTrigger(1, dropperG1Btn);
+        await waitForAutomationDelay(SEQUENCE_CONFIG.WEDGE_TO_MOVE_DELAY_MS, sequenceId);
+        moveRollToConveyorForSlot(1);
+        await waitForAutomationDelay(SEQUENCE_CONFIG.MOVE_TO_CONVEYOR_START_DELAY_MS, sequenceId);
+        disengageForSlot(1);
+        await waitForAutomationDelay(SEQUENCE_CONFIG.WEDGE_TO_MOVE_DELAY_MS, sequenceId);
+
+        // 5) Start conveyor cycle 1
+        sendConveyorAllState(1, conveyorOnBtn);
+
+        // 2s after conveyor start, move to Roll 2 / Paper 2 position
+        await waitForAutomationDelay(2000, sequenceId);
+        sendPaperTranslation(2, translationRoll2Btn);
+
+        // 3s later, send Ready to Roll
+        await waitForAutomationDelay(3000, sequenceId);
+        readyToRollForSlot(1);
+
+        // Keep conveyor running for the configured duration of this cycle.
+        const firstCycleExtraRunMs = Math.max(0, conveyorRunDurationMs - 5000);
+        if (firstCycleExtraRunMs > 0) {
+            await waitForAutomationDelay(firstCycleExtraRunMs, sequenceId);
+        }
+
+        // Stop conveyor after total 5s of cycle-1 runtime
+        sendConveyorAllState(0, conveyorOffBtn);
+        conveyorRunDurationMs += conveyorIncrementMs;
+
+        // 12s after ready command, drop Wedge 2
+        await waitForAutomationDelay(12000, sequenceId);
+        sendTrigger(2, dropperG2Btn);
+
+        // Wedge drop delay, then move to conveyor and wait move-to-conveyor delay
+        await waitForAutomationDelay(SEQUENCE_CONFIG.WEDGE_TO_MOVE_DELAY_MS, sequenceId);
+        moveRollToConveyorForSlot(1);
+        await waitForAutomationDelay(SEQUENCE_CONFIG.MOVE_TO_CONVEYOR_START_DELAY_MS, sequenceId);
+        disengageForSlot(1);
+        await waitForAutomationDelay(SEQUENCE_CONFIG.WEDGE_TO_MOVE_DELAY_MS, sequenceId);
+
+        // Continue the same cycle for rolls 3, 4, and 5
+        const remainingRollCycles = [
+            { roll: 3, translationBtn: translationRoll3Btn, wedgeGroup: 3, wedgeBtn: dropperG3Btn },
+            { roll: 4, translationBtn: translationRoll4Btn, wedgeGroup: 4, wedgeBtn: dropperG4Btn },
+            { roll: 5, translationBtn: translationRoll5Btn, wedgeGroup: 5, wedgeBtn: dropperG5Btn }
+        ];
+
+        for (const cycle of remainingRollCycles) {
+            // Conveyor run while indexing to next roll position
+            sendConveyorAllState(1, conveyorOnBtn);
+            await waitForAutomationDelay(2000, sequenceId);
+            sendPaperTranslation(cycle.roll, cycle.translationBtn);
+
+            // 3s later, send Ready to Roll, then stop conveyor
+            await waitForAutomationDelay(3000, sequenceId);
+            readyToRollForSlot(1);
+
+            const cycleExtraRunMs = Math.max(0, conveyorRunDurationMs - 5000);
+            if (cycleExtraRunMs > 0) {
+                await waitForAutomationDelay(cycleExtraRunMs, sequenceId);
+            }
+
+            sendConveyorAllState(0, conveyorOffBtn);
+            conveyorRunDurationMs += conveyorIncrementMs;
+
+            // Drop the matching wedge, then move roll to conveyor
+            await waitForAutomationDelay(12000, sequenceId);
+            sendTrigger(cycle.wedgeGroup, cycle.wedgeBtn);
+            await waitForAutomationDelay(SEQUENCE_CONFIG.WEDGE_TO_MOVE_DELAY_MS, sequenceId);
+            moveRollToConveyorForSlot(1);
+            await waitForAutomationDelay(SEQUENCE_CONFIG.MOVE_TO_CONVEYOR_START_DELAY_MS, sequenceId);
+            disengageForSlot(1);
+            await waitForAutomationDelay(SEQUENCE_CONFIG.WEDGE_TO_MOVE_DELAY_MS, sequenceId);
+        }
+
+        // Final conveyor run after last roll move
+        sendConveyorAllState(1, conveyorOnBtn);
+        await waitForAutomationDelay(conveyorRunDurationMs, sequenceId);
+        sendConveyorAllState(0, conveyorOffBtn);
+
+        showNotification('Full sequence completed (conveyors stopped)', 'success');
+    } catch (error) {
+        if (error.message === 'automation_stopped') {
+            showNotification('Full sequence stopped', 'warning');
+        } else {
+            console.error('Sequence execution failed:', error);
+            showNotification('Full sequence failed', 'error');
+        }
+    } finally {
+        automationState.isRunning = false;
+        btn.disabled = false;
+        btn.classList.remove('triggering');
+    }
+}
+
 function syncJointsFromFeedback() {
     if (!state.selectedRobot || !state.robotStates[state.selectedRobot]) {
         showNotification('No feedback data available', 'warning');
@@ -1115,27 +1465,34 @@ function readyToRollForSlot(slot) {
         showNotification(`No robot assigned to Slot ${slot}`, 'warning');
         return;
     }
+
+    // Stop any existing motion first
+    if (motionState.isMoving) {
+        stopMotion();
+        return;
+    }
     
     // Set specific joint positions for ready to roll
     const slotPanel = document.querySelector(`.joint-control-panel[data-slot="${slot}"]`);
     if (!slotPanel) return;
     
-    const positions = [0, 0.13, -0.41, -0.02, -0.83];  // Default ready to roll positions
+    const positions = [0, 0.21, -0.11, 0, -0.47];  // Default ready to roll positions
     slotPanel.querySelectorAll('.joint-slider-group').forEach((group, index) => {
         if (index < positions.length) {
             const slider = group.querySelector('.joint-slider');
             const valueInput = group.querySelector('.joint-value');
             slider.value = positions[index];
-            valueInput.value = positions[index].toFixed(2);
+            valueInput.value = positions[index].toFixed(3);
         }
     });
     
-    // Send the joint command to the robot in this slot
-    sendJointCommandForSlot(slot);
-    showNotification(`${robot} ready to roll`, 'success');
+    // Send the joint command to the robot in this slot with SLOW velocity
+    sendJointCommandForSlot(slot, MOTION_CONFIG.SLOW_VELOCITY);
+    showNotification('Ready to Roll command sent (slow speed)', 'success');
 }
 
 function moveRollToConveyorForSlot(slot) {
+    
     const robot = state.robotSlots[slot];
     if (!robot) {
         showNotification(`No robot assigned to Slot ${slot}`, 'warning');
@@ -1158,7 +1515,7 @@ function moveRollToConveyorForSlot(slot) {
     jointGroups.forEach((_, index) => {
         if (index === 1) targets[index] = -0.36;
         else if (index === 2) targets[index] = 0.46;
-        else if (index === 4) targets[index] = -0.5;
+        else if (index === 4) targets[index] = -0.47;
         else targets[index] = 0;
     });
 
@@ -1226,6 +1583,37 @@ function moveRollToConveyorForSlot(slot) {
     }
 
     motionState.currentAnimationId = requestAnimationFrame(update);
+}
+
+function disengageForSlot(slot) {
+    const robot = state.robotSlots[slot];
+    if (!robot) {
+        showNotification(`No robot assigned to Slot ${slot}`, 'warning');
+        return;
+    }
+
+    if (motionState.isMoving) {
+        stopMotion();
+        return;
+    }
+
+    const slotPanel = document.querySelector(`.joint-control-panel[data-slot="${slot}"]`);
+    if (!slotPanel) return;
+
+    // Only Joint 2 changes for disengage; all other joints remain unchanged.
+    const joint2Group = slotPanel.querySelectorAll('.joint-slider-group')[1];
+    if (!joint2Group) {
+        showNotification('Disengage failed: Joint 2 control not found', 'error');
+        return;
+    }
+
+    const slider = joint2Group.querySelector('.joint-slider');
+    const valueInput = joint2Group.querySelector('.joint-value');
+    slider.value = -0.42;
+    valueInput.value = (-0.42).toFixed(3);
+
+    sendJointCommandForSlot(slot, MOTION_CONFIG.SLOW_VELOCITY);
+    showNotification('Disengage command sent (slow speed)', 'success');
 }
 
 function stopMotionForSlot(slot) {
