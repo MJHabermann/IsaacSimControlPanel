@@ -28,6 +28,29 @@ const SEQUENCE_CONFIG = {
     CONVEYOR_RUN_TIME_MS: 10000
 };
 
+// ============== Plug_Bot Sequence Configuration ==============
+const PLUG_BOT_POSITIONS = {
+    // Joint position constants (6 movement joints + 6 gripper joints)
+    // Gripper states: 0.0=open, 0.6=grip, 1.0=close
+    starting_pos: [-1.57, 0.0, 1.57, 0.0, 1.57, 1.57, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    above_plug_pos_closed: [-1.61159, -0.45159, 1.02841, -0.00159, 1.66841, 1.60841, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    above_plug_pos_grip: [-1.61159, -0.45159, 1.02841, -0.00159, 1.66841, 1.60841, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
+    on_plug_pos: [-1.61159, -0.42159, 1.30841, -0.00159, 1.40841, 1.61841, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    pluggy_pos_front: [-0.00159, 0.29841, -1.49159, 1.53841, 1.53841, -0.73159, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    fisty_pos_front: [0.15841, 0.31841, -1.48159, 1.49841, 1.38841, -0.73159, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    pluggy_pos_back: [-0.00159, 0.29841, -1.49159, 1.53841, -1.53159, -0.73159, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
+    fisty_pos_back: [-0.16159,0.31841,-1.47159,1.57841,-1.38159, -0.72159, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    
+    // Cartesian position constants (kept for future use)
+    above_plug_cart: { position: { x: 0.043, y: -1.0696, z: 1.128 }, orientation: { w: -0.5, x: 0.5, y: -0.5, z: -0.5 } },
+    on_plug_cart: { position: { x: 0.043, y: -1.0696, z: 0.93 }, orientation: { w: -0.5, x: 0.5, y: -0.5, z: -0.5 } }
+};
+
+const PLUG_BOT_TIMING = {
+    MOVEMENT_DELAY_MS: 1000,  // 3 seconds between movements
+    GRIPPER_DELAY_MS: 500    // 2 seconds between gripper actions
+};
+
 const automationState = {
     isRunning: false,
     stopRequested: false,
@@ -421,6 +444,20 @@ function setupEventListeners() {
             sendPaperTranslation(paper, btn);
         });
     });
+
+    // Save Position button
+    const savePositionBtn = document.getElementById('savePositionBtn');
+    if (savePositionBtn) {
+        savePositionBtn.addEventListener('click', savePositionToFile);
+    }
+
+    // Plug_Bot Sequence button
+    const plugBotSequenceBtn = document.getElementById('plugBotSequenceBtn');
+    if (plugBotSequenceBtn) {
+        plugBotSequenceBtn.addEventListener('click', () => {
+            runPlugBotSequence(plugBotSequenceBtn);
+        });
+    }
 
     // Cartesian control - Slot-aware button listeners
     document.querySelectorAll('.sendCartesianCmd').forEach(btn => {
@@ -831,13 +868,13 @@ function updateFeedbackDisplayForSlot(robotState, slot) {
         updateJointSliderLabels(jointStates.names, slot);
     }
     
-    // Update Cartesian pose feedback for this slot
+    // NOTE: Automatic cartesian pose syncing is disabled to prevent constant overwriting
+    // of user-editable cartesian input fields. Use the "Sync Cartesian" button to manually
+    // sync cartesian feedback when needed.
+    // Keeping cartesian_pose in state for manual sync operations:
     if (robotState.cartesian_pose) {
-        const pose = robotState.cartesian_pose;
-        console.log(`Auto-syncing cartesian pose for slot ${slot}:`, pose);
-        setCartesianPoseForSlot(slot, pose.position, pose.orientation);
-    } else {
-        console.warn(`No cartesian_pose data in robot state for slot ${slot}. State:`, robotState);
+        // Cartesian pose is available but not auto-synced to preserve user edits
+        // console.log(`Cartesian pose available for slot ${slot}:`, robotState.cartesian_pose);
     }
 }
 
@@ -1363,6 +1400,284 @@ async function runFullProductionSequence(btn) {
     }
 }
 
+// ============== Plug_Bot Sequence Automation ==============
+
+/**
+ * Main Plug_Bot automation sequence - runs front cycle then back cycle
+ * Uses joint movements with integrated gripper states (no cartesian)
+ */
+async function runPlugBotSequence(btn) {
+    const sequenceId = startAutomationSequence();
+    if (!sequenceId) return;
+
+    const robot = state.selectedRobot;
+    if (robot !== 'Plug_Bot') {
+        showNotification('Please select Plug_Bot for this sequence', 'warning');
+        automationState.isRunning = false;
+        return;
+    }
+
+    btn.disabled = true;
+    btn.classList.add('triggering');
+    showNotification('Starting Plug_Bot sequence...', 'info');
+
+    try {
+        // ============== FRONT CYCLE ==============
+        showNotification('Front cycle: Starting...', 'info');
+        
+        // Home robot
+        homeJointsForSlot(2);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+        
+        // Move to above_plug_pos (closed gripper)
+        setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.above_plug_pos_closed);
+        sendJointCommandForSlot(2);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+        
+        // Move to on_plug_pos (closed gripper)
+        setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.on_plug_pos);
+        sendJointCommandForSlot(2);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+        
+        // Sync position
+        syncJointsFromFeedbackForSlot(2);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+        
+        // Grip plug by moving to same position with grip state
+        setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.on_plug_pos);
+        setGripperStateForSlot(2, 'grip');
+        sendJointCommandForSlot(2);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.GRIPPER_DELAY_MS, sequenceId);
+        
+        // Sync position
+        syncJointsFromFeedbackForSlot(2);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+        
+        // Send true on paper_plug topic
+        publishPaperPlugState(true);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+        
+        // Move to above_plug_pos (with grip maintained)
+        setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.above_plug_pos_grip);
+        sendJointCommandForSlot(2);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+        
+        // Home robot
+        homeJointsForSlot(2);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+        
+        // Move to pluggy_pos_front (closed gripper)
+        setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.pluggy_pos_front);
+        sendJointCommandForSlot(2);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+        
+        // Move to fisty_pos_front (closed gripper)
+        setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.fisty_pos_front);
+        sendJointCommandForSlot(2);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+        
+        // Send false on paper_plug topic
+        publishPaperPlugState(false);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+        
+        // Home robot
+        homeJointsForSlot(2);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+
+        showNotification('Front cycle completed', 'success');
+
+        // ============== BACK CYCLE ==============
+        showNotification('Back cycle: Starting...', 'info');
+        
+        // Turn on conveyor
+        sendConveyorAllState(1);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+        
+        // Move to starting position (open gripper)
+        setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.starting_pos);
+        sendJointCommandForSlot(2);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+        
+        // Move to above_plug_pos (closed gripper)
+        setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.above_plug_pos_closed);
+        sendJointCommandForSlot(2);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+        
+        // Move to on_plug_pos (closed gripper)
+        setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.on_plug_pos);
+        sendJointCommandForSlot(2);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+        
+        // Sync position
+        syncJointsFromFeedbackForSlot(2);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+        
+        // Grip plug
+        setGripperStateForSlot(2, 'grip');
+        sendJointCommandForSlot(2);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.GRIPPER_DELAY_MS, sequenceId);
+        
+        // Sync position
+        syncJointsFromFeedbackForSlot(2);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+        
+        // Send true on paper_plug topic
+        publishPaperPlugState(true);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+        
+        // Move to above_plug_pos (with grip maintained)
+        setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.above_plug_pos_grip);
+        sendJointCommandForSlot(2);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+        
+        // Home robot
+        homeJointsForSlot(2);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+        
+        // Move to pluggy_pos_back (with grip)
+        setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.pluggy_pos_back);
+        sendJointCommandForSlot(2);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+             
+        // Move to fisty_pos_back (closed gripper)
+        setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.fisty_pos_back);
+        sendJointCommandForSlot(2);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+        
+        // Send false on paper_plug topic
+        publishPaperPlugState(false);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+        
+        // Home robot
+        homeJointsForSlot(2);
+        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+
+        showNotification('Plug_Bot sequence completed successfully!', 'success');
+    } catch (error) {
+        if (error.message === 'automation_stopped') {
+            showNotification('Plug_Bot sequence stopped', 'warning');
+        } else {
+            console.error('Plug_Bot sequence failed:', error);
+            showNotification('Plug_Bot sequence failed: ' + error.message, 'error');
+        }
+    } finally {
+        automationState.isRunning = false;
+        btn.disabled = false;
+        btn.classList.remove('triggering');
+    }
+}
+
+/**
+ * Helper: Set gripper state by preset name (close, grip, open)
+ */
+function setGripperStateForSlot(slot, gripperState) {
+    // Find the gripper-slider-group for this slot
+    const gripperGroups = document.querySelectorAll('.gripper-slider-group');
+    let targetGroup = null;
+    
+    for (const group of gripperGroups) {
+        const slider = group.querySelector(`.gripper-slider[data-slot="${slot}"]`);
+        if (slider) {
+            targetGroup = group;
+            break;
+        }
+    }
+    
+    if (!targetGroup) {
+        console.warn(`Gripper group not found for slot ${slot}`);
+        return;
+    }
+
+    const slider = targetGroup.querySelector('.gripper-slider');
+    const valueInput = targetGroup.querySelector('.gripper-value');
+
+    let value;
+    switch (gripperState) {
+        case 'open':
+            value = 0.0;
+            break;
+        case 'grip':
+            value = 0.6;
+            break;
+        case 'close':
+            value = 1.0;
+            break;
+        default:
+            console.warn(`Unknown gripper state: ${gripperState}`);
+            return;
+    }
+
+    slider.value = value;
+    if (valueInput) {
+        valueInput.value = value.toFixed(3);
+    }
+
+    // Send the command
+    setTimeout(() => sendJointCommandForSlot(slot), 100);
+}
+
+/**
+ * Helper: Publish bool value to /paper_plug/state topic
+ * Works exactly like sendCutterDoorTrigger
+ */
+function publishPaperPlugState(plugState) {
+    if (state.socket && state.connected) {
+        // Use WebSocket - exactly like door trigger
+        state.socket.emit('publish_paper_plug_state', { value: plugState ? 1 : 0 });
+        console.log('Emitted publish_paper_plug_state via WebSocket:', { value: plugState ? 1 : 0 });
+    } else {
+        // Use REST API as fallback
+        const value = plugState ? 1 : 0;
+        authFetch(`/api/trigger/paper-plug/${value}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        }).then(r => r.json()).then(data => {
+            console.log('Paper plug REST response:', data);
+        }).catch(err => {
+            console.error('Failed to publish paper_plug state:', err);
+        });
+    }
+}
+
+/**
+ * Helper: Send conveyor all state (turn on/off)
+ */
+function sendConveyorAllState(value) {
+    const valueInt = value ? 1 : 0;
+    if (state.socket && state.connected) {
+        state.socket.emit('send_conveyor_all_state', { value: valueInt });
+    } else {
+        authFetch(`/api/trigger/conveyor-all/${valueInt}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        }).then(r => r.json()).catch(err => {
+            console.error('Failed to send conveyor state:', err);
+        });
+    }
+}
+
+/**
+ * Test function for debugging paper_plug state publishing
+ * Call from console: testPaperPlugPublish(true) or testPaperPlugPublish(false)
+ */
+function testPaperPlugPublish(testValue) {
+    console.log('======== PAPER PLUG TEST ========');
+    console.log('Test Value:', testValue);
+    console.log('WebSocket Connected:', state.socket && state.connected);
+    if (state.socket) {
+        console.log('Socket ID:', state.socket.id);
+        console.log('Socket Rooms:', state.socket.rooms);
+    }
+    
+    console.log('Starting test publish to /paper_plug/state...');
+    publishPaperPlugState(testValue);
+    
+    console.log('Test publish initiated. Check logs above and browser console.');
+    console.log('======== END PAPER PLUG TEST ========');
+}
+
+window.testPaperPlugPublish = testPaperPlugPublish;
+
 function syncJointsFromFeedback() {
     if (!state.selectedRobot || !state.robotStates[state.selectedRobot]) {
         showNotification('No feedback data available', 'warning');
@@ -1817,6 +2132,51 @@ function startUpdateRateMonitor() {
         state.updateCount = 0;
         document.getElementById('updateRate').textContent = `${rate} Hz`;
     }, 1000);
+}
+
+// ============== Position Saving ==============
+async function savePositionToFile() {
+    const robot = state.selectedRobot;
+    if (!robot) {
+        showNotification('Please select a robot first', 'warning');
+        return;
+    }
+
+    // Collect joint positions for both slots
+    const slot1Robot = state.robotSlots[1];
+    const slot2Robot = state.robotSlots[2];
+
+    const positionData = {
+        timestamp: new Date().toISOString(),
+        slot1: {
+            robot: slot1Robot,
+            joints: slot1Robot ? getJointPositionsForSlot(1) : [],
+            cartesian: slot1Robot ? getCartesianPoseForSlot(1) : {}
+        },
+        slot2: {
+            robot: slot2Robot,
+            joints: slot2Robot ? getJointPositionsForSlot(2) : [],
+            cartesian: slot2Robot ? getCartesianPoseForSlot(2) : {}
+        }
+    };
+
+    try {
+        const response = await authFetch('/api/save-position', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(positionData)
+        });
+
+        const data = await response.json();
+        if (data.success) {
+            showNotification(`Position saved to ${data.filename}`, 'success');
+        } else {
+            showNotification(`Failed to save position: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Save position error:', error);
+        showNotification(`Error saving position: ${error.message}`, 'error');
+    }
 }
 
 // ============== Cleanup ==============

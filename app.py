@@ -557,6 +557,66 @@ def set_conveyor_all_state(value: int):
     })
 
 
+@app.route('/api/save-position', methods=['POST'])
+@login_required
+def save_position():
+    """Save joint and cartesian positions to a timestamped file"""
+    from datetime import datetime
+    import os
+    import json
+    
+    try:
+        data = request.get_json()
+        
+        # Create positions directory if it doesn't exist
+        positions_dir = os.path.join(app.instance_path, 'positions')
+        os.makedirs(positions_dir, exist_ok=True)
+        
+        # Create timestamped filename (from the provided timestamp or current time)
+        timestamp_str = data.get('timestamp', datetime.now().isoformat())
+        # Parse ISO format and create readable filename
+        try:
+            dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+            filename = f"positions_{dt.strftime('%Y%m%d_%H%M%S')}.json"
+        except:
+            filename = f"positions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        
+        filepath = os.path.join(positions_dir, filename)
+        
+        # Write the position data to file
+        with open(filepath, 'w') as f:
+            json.dump(data, f, indent=2)
+        
+        return jsonify({
+            'success': True,
+            'filename': filename,
+            'filepath': filepath
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/trigger/paper-plug/<int:value>', methods=['POST'])
+@login_required
+def publish_paper_plug_state(value: int):
+    """Publish bool state to /paper_plug/state topic (1=true, 0=false)"""
+    if value not in [0, 1]:
+        return jsonify({'success': False, 'error': 'Value must be 0 or 1'}), 400
+
+    manager = get_manager()
+    success = manager.publish_paper_plug_state(value == 1)
+
+    return jsonify({
+        'success': success,
+        'action': 'paper_plug_state',
+        'value': value == 1
+    })
+
+
 # ============== WebSocket Events ==============
 
 @socketio.on('connect')
@@ -810,6 +870,31 @@ def handle_conveyor_all_trigger_legacy():
         'success': success,
         'action': 'conveyor_all_state',
         'value': 1
+    })
+
+
+@socketio.on('publish_paper_plug_state')
+@authenticated_only
+def handle_paper_plug_state(data):
+    """Handle paper_plug state command via WebSocket"""
+    value = data.get('value')
+
+    if not isinstance(value, int) or value not in [0, 1]:
+        emit('command_result', {
+            'type': 'paper_plug_state',
+            'success': False,
+            'error': 'Value must be 0 or 1'
+        })
+        return
+
+    manager = get_manager()
+    success = manager.publish_paper_plug_state(value == 1)
+
+    emit('command_result', {
+        'type': 'paper_plug_state',
+        'success': success,
+        'action': 'paper_plug_state',
+        'value': value == 1
     })
 
 

@@ -123,7 +123,8 @@ class RobotManager:
             '/Roll5/Paper5',
             '/Conveyor/Conveyor1',
             '/Conveyor/Conveyor2',
-            '/Conveyor/Conveyor3'
+            '/Conveyor/Conveyor3',
+            '/paper_plug/state'
         ]
         
         for topic in trigger_topics:
@@ -298,6 +299,30 @@ class RobotManager:
             pub.publish(msg)
             self._node.get_logger().info(f'Conveyor state {topic}: {enabled}')
 
+        return True
+    
+    def publish_paper_plug_state(self, state: bool) -> bool:
+        """
+        Publish bool value to /paper_plug/state topic.
+        
+        Args:
+            state: True or False to publish
+            
+        Returns:
+            True if sent successfully
+        """
+        topic = '/paper_plug/state'
+        
+        if topic not in self._trigger_publishers:
+            self._node.get_logger().error(f'Unknown trigger topic: {topic}')
+            return False
+        
+        pub = self._trigger_publishers[topic]
+        msg = Bool()
+        msg.data = state
+        pub.publish(msg)
+        self._node.get_logger().info(f'Published /paper_plug/state: {state}')
+        
         return True
     
     def add_robot(self, namespace: str, num_joints: int = 6, 

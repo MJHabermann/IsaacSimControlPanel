@@ -1,0 +1,119 @@
+home robot
+starting_pos = [-1.57,0.0,1.57,0.0,1.57,1.57]
+close_grip
+above_plug_pos = [
+      -1.61159,
+      -0.45159,
+      1.02841,
+      -0.00159,
+      1.66841,
+      1.60841,
+      0.82041,
+      0.82041,
+      0.82041,
+      0.82041,
+      0.82041,
+      0.82041
+    ]
+on_plug_pos = [
+      -1.61159,
+      -0.42159,
+      1.30841,
+      -0.00159,
+      1.40841,
+      1.61841,
+      0.82041,
+      0.82041,
+      0.82041,
+      0.82041,
+      0.82041,
+      0.82041
+    ]
+sync_pos
+grip_plug
+sync_pos
+send_true_on_plug_topic
+above_plug_pos
+home
+
+
+
+pluggy_pos_front = [
+      -0.00159,
+      0.29841,
+      -1.49159,
+      1.53841,
+      1.53841,
+      -0.73159,
+      0.82041,
+      0.82041,
+      0.82041,
+      0.82041,
+      0.82041,
+      0.82041
+    ]
+sync_pos
+close_grip
+sync_pos
+fisty_pos_front = [
+      0.15841,
+      0.31841,
+      -1.48159,
+      1.49841,
+      1.38841,
+      -0.73159,
+      0.82041,
+      0.82041,
+      0.82041,
+      0.82041,
+      0.82041,
+      0.82041
+    ]
+send_false_on_plug_topic
+pluggy_pos_front
+home
+move_conveyer
+starting_pos
+close_grip
+above_plug_cart
+on_plug_cart
+sync_pos
+grip_plug
+sync_pos
+send_true_on_plug_topic
+above_plug_cart
+home
+pluggy_pos_back = [
+      -0.00159,
+      0.29841,
+      -1.49159,
+      1.53841,
+      -1.53159,
+      -0.73159,
+      0.82041,
+      0.82041,
+      0.82041,
+      0.82041,
+      0.82041,
+      0.82041
+    ]
+sync_pos
+close_grip
+sync_pos
+fisty_pos_back = [
+      -0.16159,
+      0.31841,
+      -1.47159,
+      1.57841,
+      -1.38159,
+      -0.72159,
+      0.82041,
+      0.82041,
+      0.82041,
+      0.82041,
+      0.82041,
+      0.82041
+    ]
+send_false_on_plug_topic
+go home
+#end of cycle
