@@ -296,6 +296,36 @@ body {
     gap: var(--spacing-sm);
 }
 
+.expo-slot-status {
+    margin-top: var(--spacing-lg);
+    padding-top: var(--spacing-md);
+    border-top: 1px solid var(--border-color);
+}
+
+.expo-slot-status h3 {
+    font-size: 0.875rem;
+    font-weight: 600;
+    margin-bottom: var(--spacing-sm);
+    color: var(--text-secondary);
+}
+
+.expo-slot-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-sm);
+}
+
+.expo-slot-label {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.display-dev .expo-slot-status {
+    display: none;
+}
+
 .add-robot-form input {
     width: 100%;
 }
@@ -1217,6 +1247,92 @@ input[type="text"]::placeholder {
 
 .btn-trigger.triggering {
     animation: trigger-pulse 0.2s ease;
+}
+
+/* ============== Display Type Selector ============== */
+.display-type-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+.btn-display-type {
+    width: 100%;
+    padding: var(--spacing-md);
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+/* ============== Expo Mode ============== */
+.display-expo .trigger-panel,
+.display-expo .translation-panel,
+.display-expo .control-panels,
+.display-expo .feedback-panel {
+    display: none;
+}
+
+.display-expo .main-content {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr);
+    grid-template-rows: auto;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    justify-items: stretch;
+    align-items: start;
+}
+
+.display-expo .robot-selection-panel {
+    grid-column: 1;
+    grid-row: 1;
+}
+
+.display-expo .roll-holder-panel {
+    grid-column: 2;
+    grid-row: 1;
+}
+
+.display-expo .roll-holder-controls .btn {
+    display: none;
+}
+
+.display-expo #autoSequenceBtn,
+.display-expo #stopAutomationBtn {
+    display: inline-flex;
+    flex: 1 1 330px;
+    min-height: 54px;
+    padding: 0.75rem 1.5rem;
+    font-size: 1.05rem;
+    font-weight: 700;
+}
+
+.display-expo .roll-holder-panel .panel-content {
+    padding: calc(var(--spacing-lg) * 1.5);
+}
+
+.display-expo .roll-holder-controls {
+    gap: calc(var(--spacing-md) * 1.5);
+}
+
+@media (max-width: 767px) {
+    .display-expo .main-content {
+        grid-template-columns: 1fr;
+        max-width: 100%;
+        padding: var(--spacing-md);
+    }
+
+    .display-expo .robot-selection-panel,
+    .display-expo .roll-holder-panel {
+        grid-column: 1;
+        width: 100%;
+    }
+
+    .display-expo .robot-selection-panel {
+        grid-row: 1;
+    }
+
+    .display-expo .roll-holder-panel {
+        grid-row: 2;
+    }
 }
 
 @keyframes trigger-pulse {

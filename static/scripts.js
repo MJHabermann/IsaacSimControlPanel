@@ -720,18 +720,17 @@ function updateSlotAssignments() {
     // Update the display labels in each slot
     for (let slot of [1, 2]) {
         const robot = state.robotSlots[slot];
-        const label = document.querySelector(`.robot-slot-${slot}`);
-        if (label) {
-            const displayText = robot ? robot : 'No robot assigned';
+        const displayText = robot ? robot : 'No robot assigned';
+
+        document.querySelectorAll(`.robot-slot-${slot}, .expo-robot-slot-${slot}`).forEach(label => {
             if (label.textContent !== displayText) {
                 label.textContent = displayText;
             }
-        }
+        });
         
         // Also update cartesian panel header
         const cartLabel = document.querySelector(`.robot-slot-${slot}-cart`);
         if (cartLabel) {
-            const displayText = robot ? robot : 'No robot assigned';
             if (cartLabel.textContent !== displayText) {
                 cartLabel.textContent = displayText;
             }

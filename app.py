@@ -9,7 +9,7 @@ import json
 import atexit
 import functools
 from typing import Dict, Any, List
-from flask import Flask, render_template, request, jsonify, redirect, url_for, flash
+from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session
 from flask_socketio import SocketIO, emit, disconnect
 from flask_cors import CORS
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
@@ -198,12 +198,9 @@ def login():
         if username == Config.ADMIN_USERNAME and check_password_hash(Config.ADMIN_PASSWORD_HASH, password):
             user = users.get('admin')
             login_user(user, remember=True)
-            
-            # Redirect to requested page or dashboard
-            next_page = request.args.get('next')
-            if next_page and next_page.startswith('/'):
-                return redirect(next_page)
-            return redirect(url_for('index'))
+
+            # Always choose display mode after login.
+            return redirect(url_for('select_display_type'))
         else:
             flash('Invalid username or password', 'error')
     
@@ -215,6 +212,7 @@ def login():
 def logout():
     """Logout handler"""
     logout_user()
+    session.pop('hmi_display_type', None)
     flash('You have been logged out.', 'info')
     return redirect(url_for('login'))
 
@@ -225,7 +223,27 @@ def logout():
 @login_required
 def index():
     """Main dashboard page"""
-    return render_template('index.html')
+    display_mode = session.get('hmi_display_type')
+    if display_mode not in ['dev', 'expo']:
+        return redirect(url_for('select_display_type'))
+
+    return render_template('index.html', display_mode=display_mode)
+
+
+@app.route('/display-type', methods=['GET', 'POST'])
+@login_required
+def select_display_type():
+    """Prompt user to choose HMI display type after login."""
+    if request.method == 'POST':
+        display_type = request.form.get('display_type', '').strip().lower()
+        if display_type in ['dev', 'expo']:
+            session['hmi_display_type'] = display_type
+            return redirect(url_for('index'))
+
+        flash('Please choose a valid HMI display type.', 'error')
+
+    current_mode = session.get('hmi_display_type')
+    return render_template('display_type.html', current_mode=current_mode)
 
 
 @app.route('/health')

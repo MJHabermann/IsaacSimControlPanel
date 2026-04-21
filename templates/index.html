@@ -8,7 +8,7 @@
     <!-- Socket.IO -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
 </head>
-<body>
+<body class="{% if display_mode == 'expo' %}display-expo{% else %}display-dev{% endif %}">
     <div class="app-container">
         <!-- Header -->
         <header class="header">
@@ -72,13 +72,24 @@
                             <input type="text" id="newRobotNamespace" placeholder="Enter robot namespace..." />
                             <button class="btn btn-primary" id="addRobotBtn">+ Add Robot</button>
                         </div>
+                        <div class="expo-slot-status">
+                            <h3>Assigned Robots</h3>
+                            <div class="expo-slot-row">
+                                <span class="expo-slot-label">Slot 1</span>
+                                <span class="selected-robot expo-robot-slot-1">No robot assigned</span>
+                            </div>
+                            <div class="expo-slot-row">
+                                <span class="expo-slot-label">Slot 2</span>
+                                <span class="selected-robot expo-robot-slot-2">No robot assigned</span>
+                            </div>
+                        </div>
                     </div>
                 </section>
 
                 <!-- Roll Holder Panel -->
                 <section class="panel roll-holder-panel">
                     <div class="panel-header">
-                        <h2>Holder and Door Controls</h2>
+                        <h2>{% if display_mode == 'expo' %}Automation{% else %}Holder and Door Controls{% endif %}</h2>
                     </div>
                     <div class="panel-content">
                         <!-- Roll holder controls -->
