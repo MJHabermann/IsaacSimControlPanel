@@ -375,6 +375,23 @@ def get_all_robot_states():
     })
 
 
+@app.route('/api/sensors/<sensor_name>/state', methods=['GET'])
+@login_required
+def get_sensor_state(sensor_name: str):
+    """Get current boolean state of a named sensor."""
+    manager = get_manager()
+    value = manager.get_sensor_state(sensor_name)
+
+    if value is None:
+        return jsonify({'success': False, 'error': 'Sensor not found'}), 404
+
+    return jsonify({
+        'success': True,
+        'sensor': sensor_name,
+        'state': value
+    })
+
+
 @app.route('/api/robot/<namespace>/joint_command', methods=['POST'])
 @login_required
 def send_joint_command(namespace: str):

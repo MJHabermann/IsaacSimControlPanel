@@ -56,6 +56,11 @@ class RobotManager:
         self._node: Optional[RobotManagerNode] = None
         self._state_callbacks: List[Callable] = []
         self._command_queue = queue.Queue()
+        self._sensor_states: Dict[str, bool] = {
+            'beam_1': False,
+            'beam_2': False,
+        }
+        self._sensor_subscriptions: Dict[str, Any] = {}
         
         # Trigger publishers for Stopper groups
         self._trigger_publishers: Dict[str, Any] = {}
@@ -71,6 +76,9 @@ class RobotManager:
         
         # Initialize trigger publishers
         self._init_trigger_publishers()
+
+        # Initialize beam sensor subscribers
+        self._init_sensor_subscribers()
         
         # Start spinning in background
         self._start_spinning()
@@ -131,6 +139,48 @@ class RobotManager:
             pub = self._node.create_publisher(Bool, topic, qos_profile)
             self._trigger_publishers[topic] = pub
             self._node.get_logger().info(f'Created trigger publisher: {topic}')
+
+    def _init_sensor_subscribers(self):
+        """Initialize beam sensor subscriptions."""
+        qos_profile = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10
+        )
+
+        sensor_topics = {
+            'beam_1': '/beam_1/state',
+            'beam_2': '/beam_2/state',
+        }
+
+        for sensor_name, topic in sensor_topics.items():
+            sub = self._node.create_subscription(
+                Bool,
+                topic,
+                self._make_sensor_callback(sensor_name),
+                qos_profile
+            )
+            self._sensor_subscriptions[sensor_name] = sub
+            self._node.get_logger().info(f'Subscribed to sensor: {topic}')
+
+    def _make_sensor_callback(self, sensor_name: str):
+        """Create a callback for a named sensor."""
+        def callback(msg: Bool):
+            with self._lock:
+                self._sensor_states[sensor_name] = bool(msg.data)
+        return callback
+
+    def get_sensor_state(self, sensor_name: str) -> Optional[bool]:
+        """Get current state of a named sensor."""
+        with self._lock:
+            if sensor_name not in self._sensor_states:
+                return None
+            return self._sensor_states[sensor_name]
+
+    def get_all_sensor_states(self) -> Dict[str, bool]:
+        """Get snapshot of all known sensor states."""
+        with self._lock:
+            return dict(self._sensor_states)
     
     def send_trigger(self, group: int) -> bool:
         """

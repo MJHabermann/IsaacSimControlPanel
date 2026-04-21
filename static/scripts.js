@@ -21,10 +21,10 @@ const MOTION_CONFIG = {
 };
 
 const SEQUENCE_CONFIG = {
-    CUTTER_TO_HOLDER_DELAY_MS: 18000,
-    HOLDER_TO_WEDGE_DELAY_MS: 8000,
+    CUTTER_TO_HOLDER_DELAY_MS: 12000,
+    HOLDER_TO_WEDGE_DELAY_MS: 6000,
     WEDGE_TO_MOVE_DELAY_MS: 3000,
-    MOVE_TO_CONVEYOR_START_DELAY_MS: 14000,
+    MOVE_TO_CONVEYOR_START_DELAY_MS: 10000,
     CONVEYOR_RUN_TIME_MS: 10000
 };
 
@@ -36,10 +36,10 @@ const PLUG_BOT_POSITIONS = {
     above_plug_pos_closed: [-1.61159, -0.45159, 1.02841, -0.00159, 1.66841, 1.60841, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
     above_plug_pos_grip: [-1.61159, -0.45159, 1.02841, -0.00159, 1.66841, 1.60841, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
     on_plug_pos: [-1.61159, -0.42159, 1.30841, -0.00159, 1.40841, 1.61841, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-    pluggy_pos_front: [-0.00159, 0.29841, -1.49159, 1.53841, 1.53841, -0.73159, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-    fisty_pos_front: [0.15841, 0.31841, -1.48159, 1.49841, 1.38841, -0.73159, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-    pluggy_pos_back: [-0.00159, 0.29841, -1.49159, 1.53841, -1.53159, -0.73159, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
-    fisty_pos_back: [-0.16159,0.31841,-1.47159,1.57841,-1.38159, -0.72159, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    pluggy_pos_front: [      0.06841,0.72841,-1.42159,1.47841,1.65841,-0.38159, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    fisty_pos_front: [0.12841,0.72841,-1.41159,1.43841,1.60841,-0.38159, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    pluggy_pos_back: [-0.00159,0.64841,-1.48159,1.53841,-1.52159,-1.07159, 0.6, 0.6, 0.6, 0.6, 0.6, 0.6],
+    fisty_pos_back: [-0.11159,0.65841,-1.48159,1.60841,-1.41159,-1.07159, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
     
     // Cartesian position constants (kept for future use)
     above_plug_cart: { position: { x: 0.043, y: -1.0696, z: 1.128 }, orientation: { w: -0.5, x: 0.5, y: -0.5, z: -0.5 } },
@@ -1205,6 +1205,168 @@ async function waitForAutomationDelay(ms, sequenceId) {
     }
 }
 
+async function waitForSensorState(sensorName, expectedState, sequenceId, timeoutMs = 90000, pollIntervalMs = 200) {
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < timeoutMs) {
+        if (automationState.stopRequested || automationState.sequenceId !== sequenceId) {
+            throw new Error('automation_stopped');
+        }
+
+        try {
+            const response = await authFetch(`/api/sensors/${sensorName}/state`);
+            const data = await response.json();
+
+            if (data.success && data.state === expectedState) {
+                return;
+            }
+        } catch (error) {
+            console.warn(`Sensor read failed for ${sensorName}:`, error);
+        }
+
+        await sleep(pollIntervalMs);
+    }
+
+    throw new Error(`sensor_timeout:${sensorName}`);
+}
+
+async function executePlugBotSequence(sequenceId) {
+    // ============== FRONT CYCLE ==============
+    showNotification('Front cycle: Starting...', 'info');
+
+    // Home robot
+    homeJointsForSlot(2);
+    await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+
+    // Move to above_plug_pos (closed gripper)
+    setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.above_plug_pos_closed);
+    sendJointCommandForSlot(2);
+    await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+
+    // Move to on_plug_pos (closed gripper)
+    setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.on_plug_pos);
+    sendJointCommandForSlot(2);
+    await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+
+    // Sync position
+    syncJointsFromFeedbackForSlot(2);
+    await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+
+    // Grip plug by moving to same position with grip state
+    setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.on_plug_pos);
+    setGripperStateForSlot(2, 'grip');
+    sendJointCommandForSlot(2);
+    await waitForAutomationDelay(PLUG_BOT_TIMING.GRIPPER_DELAY_MS, sequenceId);
+
+    // Sync position
+    syncJointsFromFeedbackForSlot(2);
+    await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+
+    // Send true on paper_plug topic
+    publishPaperPlugState(true);
+    await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+
+    // Move to above_plug_pos (with grip maintained)
+    setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.above_plug_pos_grip);
+    sendJointCommandForSlot(2);
+    await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+
+    // Home robot
+    homeJointsForSlot(2);
+    await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+
+    // Move to pluggy_pos_front (closed gripper)
+    setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.pluggy_pos_front);
+    sendJointCommandForSlot(2);
+    await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+
+    // Move to fisty_pos_front (closed gripper)
+    setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.fisty_pos_front);
+    sendJointCommandForSlot(2);
+    await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+
+    // Send false on paper_plug topic
+    publishPaperPlugState(false);
+    await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+
+    // Home robot
+    homeJointsForSlot(2);
+    await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+
+    showNotification('Front cycle completed', 'success');
+
+    // Move conveyor until beam_2 is detected, then stop.
+    sendConveyorAllState(1);
+    await waitForSensorState('beam_2', true, sequenceId);
+    sendConveyorAllState(0);
+
+    // ============== BACK CYCLE ==============
+    showNotification('Back cycle: Starting...', 'info');
+
+    // Turn on conveyor
+    //sendConveyorAllState(1);
+    //await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+
+    // Move to starting position (open gripper)
+    setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.starting_pos);
+    sendJointCommandForSlot(2);
+    await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+
+    // Move to above_plug_pos (closed gripper)
+    setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.above_plug_pos_closed);
+    sendJointCommandForSlot(2);
+    await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+
+    // Move to on_plug_pos (closed gripper)
+    setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.on_plug_pos);
+    sendJointCommandForSlot(2);
+    await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+
+    // Sync position
+    syncJointsFromFeedbackForSlot(2);
+    await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+
+    // Grip plug
+    setGripperStateForSlot(2, 'grip');
+    sendJointCommandForSlot(2);
+    await waitForAutomationDelay(PLUG_BOT_TIMING.GRIPPER_DELAY_MS, sequenceId);
+
+    // Sync position
+    syncJointsFromFeedbackForSlot(2);
+    await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+
+    // Send true on paper_plug topic
+    publishPaperPlugState(true);
+    await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+
+    // Move to above_plug_pos (with grip maintained)
+    setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.above_plug_pos_grip);
+    sendJointCommandForSlot(2);
+    await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+
+    // Home robot
+    homeJointsForSlot(2);
+    await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+
+    // Move to pluggy_pos_back (with grip)
+    setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.pluggy_pos_back);
+    sendJointCommandForSlot(2);
+    await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+
+    // Move to fisty_pos_back (closed gripper)
+    setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.fisty_pos_back);
+    sendJointCommandForSlot(2);
+    await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+
+    // Send false on paper_plug topic
+    publishPaperPlugState(false);
+    await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+
+    // Home robot
+    homeJointsForSlot(2);
+    await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+}
+
 async function runDoorAndHolderOnlySequence(btn) {
     const sequenceId = startAutomationSequence();
     if (!sequenceId) return;
@@ -1283,11 +1445,26 @@ async function runFullProductionSequence(btn) {
     btn.classList.add('triggering');
     showNotification('Running full sequence...', 'info');
 
-    // Conveyor runtime increases by 4s on each subsequent conveyor cycle (doubled timing).
-    let conveyorRunDurationMs = 10000;
-    const conveyorIncrementMs = 4000;
-
     try {
+        const runPlugPhase = async (isLastRoll = false) => {
+            // Always stop the paper roll using beam_1, then run Plug_Bot sequence.
+            sendConveyorAllState(1, conveyorOnBtn);
+            await waitForSensorState('beam_1', true, sequenceId);
+            sendConveyorAllState(0, conveyorOffBtn);
+
+            if (state.robotSlots[2] !== 'Plug_Bot') {
+                throw new Error('plug_bot_missing_in_slot_2');
+            }
+            await executePlugBotSequence(sequenceId);
+
+            // Last roll: after plugging, move conveyor for 5 seconds.
+            if (isLastRoll) {
+                sendConveyorAllState(1, conveyorOnBtn);
+                await waitForAutomationDelay(5000, sequenceId);
+                sendConveyorAllState(0, conveyorOffBtn);
+            }
+        };
+
         // 1) Open cutter door, then 14s delay
         sendCutterDoorTrigger(cutterDoorBtn);
         await waitForAutomationDelay(SEQUENCE_CONFIG.CUTTER_TO_HOLDER_DELAY_MS, sequenceId);
@@ -1312,78 +1489,34 @@ async function runFullProductionSequence(btn) {
         await waitForAutomationDelay(SEQUENCE_CONFIG.MOVE_TO_CONVEYOR_START_DELAY_MS, sequenceId);
         disengageForSlot(1);
         await waitForAutomationDelay(SEQUENCE_CONFIG.WEDGE_TO_MOVE_DELAY_MS, sequenceId);
+        // Plug phase for roll 1
+        await runPlugPhase(false);
 
-        // 5) Start conveyor cycle 1
-        sendConveyorAllState(1, conveyorOnBtn);
-
-        // 2s after conveyor start, move to Roll 2 / Paper 2 position
-        await waitForAutomationDelay(2000, sequenceId);
-        sendPaperTranslation(2, translationRoll2Btn);
-
-        // 3s later, send Ready to Roll
-        await waitForAutomationDelay(3000, sequenceId);
-        readyToRollForSlot(1);
-
-        // Keep conveyor running for the configured duration of this cycle.
-        const firstCycleExtraRunMs = Math.max(0, conveyorRunDurationMs - 5000);
-        if (firstCycleExtraRunMs > 0) {
-            await waitForAutomationDelay(firstCycleExtraRunMs, sequenceId);
-        }
-
-        // Stop conveyor after total 5s of cycle-1 runtime
-        sendConveyorAllState(0, conveyorOffBtn);
-        conveyorRunDurationMs += conveyorIncrementMs;
-
-        // 12s after ready command, drop Wedge 2
-        await waitForAutomationDelay(12000, sequenceId);
-        sendTrigger(2, dropperG2Btn);
-
-        // Wedge drop delay, then move to conveyor and wait move-to-conveyor delay
-        await waitForAutomationDelay(SEQUENCE_CONFIG.WEDGE_TO_MOVE_DELAY_MS, sequenceId);
-        moveRollToConveyorForSlot(1);
-        await waitForAutomationDelay(SEQUENCE_CONFIG.MOVE_TO_CONVEYOR_START_DELAY_MS, sequenceId);
-        disengageForSlot(1);
-        await waitForAutomationDelay(SEQUENCE_CONFIG.WEDGE_TO_MOVE_DELAY_MS, sequenceId);
-
-        // Continue the same cycle for rolls 3, 4, and 5
-        const remainingRollCycles = [
-            { roll: 3, translationBtn: translationRoll3Btn, wedgeGroup: 3, wedgeBtn: dropperG3Btn },
-            { roll: 4, translationBtn: translationRoll4Btn, wedgeGroup: 4, wedgeBtn: dropperG4Btn },
-            { roll: 5, translationBtn: translationRoll5Btn, wedgeGroup: 5, wedgeBtn: dropperG5Btn }
+        // Rolls 2-5 follow the same sequence; roll 5 ends with extra 5s conveyor move.
+        const rollCycles = [
+            { roll: 2, translationBtn: translationRoll2Btn, dropperBtn: dropperG2Btn },
+            { roll: 3, translationBtn: translationRoll3Btn, dropperBtn: dropperG3Btn },
+            { roll: 4, translationBtn: translationRoll4Btn, dropperBtn: dropperG4Btn },
+            { roll: 5, translationBtn: translationRoll5Btn, dropperBtn: dropperG5Btn }
         ];
 
-        for (const cycle of remainingRollCycles) {
-            // Conveyor run while indexing to next roll position
-            sendConveyorAllState(1, conveyorOnBtn);
-            await waitForAutomationDelay(2000, sequenceId);
+        for (const cycle of rollCycles) {
             sendPaperTranslation(cycle.roll, cycle.translationBtn);
 
-            // 3s later, send Ready to Roll, then stop conveyor
             await waitForAutomationDelay(3000, sequenceId);
             readyToRollForSlot(1);
 
-            const cycleExtraRunMs = Math.max(0, conveyorRunDurationMs - 5000);
-            if (cycleExtraRunMs > 0) {
-                await waitForAutomationDelay(cycleExtraRunMs, sequenceId);
-            }
+            await waitForAutomationDelay(8000, sequenceId);
+            sendTrigger(cycle.roll, cycle.dropperBtn);
 
-            sendConveyorAllState(0, conveyorOffBtn);
-            conveyorRunDurationMs += conveyorIncrementMs;
-
-            // Drop the matching wedge, then move roll to conveyor
-            await waitForAutomationDelay(12000, sequenceId);
-            sendTrigger(cycle.wedgeGroup, cycle.wedgeBtn);
             await waitForAutomationDelay(SEQUENCE_CONFIG.WEDGE_TO_MOVE_DELAY_MS, sequenceId);
             moveRollToConveyorForSlot(1);
             await waitForAutomationDelay(SEQUENCE_CONFIG.MOVE_TO_CONVEYOR_START_DELAY_MS, sequenceId);
             disengageForSlot(1);
             await waitForAutomationDelay(SEQUENCE_CONFIG.WEDGE_TO_MOVE_DELAY_MS, sequenceId);
-        }
 
-        // Final conveyor run after last roll move
-        sendConveyorAllState(1, conveyorOnBtn);
-        await waitForAutomationDelay(conveyorRunDurationMs, sequenceId);
-        sendConveyorAllState(0, conveyorOffBtn);
+            await runPlugPhase(cycle.roll === 5);
+        }
 
         showNotification('Full sequence completed (conveyors stopped)', 'success');
     } catch (error) {
@@ -1410,9 +1543,9 @@ async function runPlugBotSequence(btn) {
     const sequenceId = startAutomationSequence();
     if (!sequenceId) return;
 
-    const robot = state.selectedRobot;
-    if (robot !== 'Plug_Bot') {
-        showNotification('Please select Plug_Bot for this sequence', 'warning');
+    const slot2Robot = state.robotSlots[2];
+    if (slot2Robot !== 'Plug_Bot') {
+        showNotification('Please assign Plug_Bot to Slot 2 for this sequence', 'warning');
         automationState.isRunning = false;
         return;
     }
@@ -1422,135 +1555,7 @@ async function runPlugBotSequence(btn) {
     showNotification('Starting Plug_Bot sequence...', 'info');
 
     try {
-        // ============== FRONT CYCLE ==============
-        showNotification('Front cycle: Starting...', 'info');
-        
-        // Home robot
-        homeJointsForSlot(2);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
-        
-        // Move to above_plug_pos (closed gripper)
-        setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.above_plug_pos_closed);
-        sendJointCommandForSlot(2);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
-        
-        // Move to on_plug_pos (closed gripper)
-        setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.on_plug_pos);
-        sendJointCommandForSlot(2);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
-        
-        // Sync position
-        syncJointsFromFeedbackForSlot(2);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
-        
-        // Grip plug by moving to same position with grip state
-        setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.on_plug_pos);
-        setGripperStateForSlot(2, 'grip');
-        sendJointCommandForSlot(2);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.GRIPPER_DELAY_MS, sequenceId);
-        
-        // Sync position
-        syncJointsFromFeedbackForSlot(2);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
-        
-        // Send true on paper_plug topic
-        publishPaperPlugState(true);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
-        
-        // Move to above_plug_pos (with grip maintained)
-        setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.above_plug_pos_grip);
-        sendJointCommandForSlot(2);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
-        
-        // Home robot
-        homeJointsForSlot(2);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
-        
-        // Move to pluggy_pos_front (closed gripper)
-        setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.pluggy_pos_front);
-        sendJointCommandForSlot(2);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
-        
-        // Move to fisty_pos_front (closed gripper)
-        setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.fisty_pos_front);
-        sendJointCommandForSlot(2);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
-        
-        // Send false on paper_plug topic
-        publishPaperPlugState(false);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
-        
-        // Home robot
-        homeJointsForSlot(2);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
-
-        showNotification('Front cycle completed', 'success');
-
-        // ============== BACK CYCLE ==============
-        showNotification('Back cycle: Starting...', 'info');
-        
-        // Turn on conveyor
-        sendConveyorAllState(1);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
-        
-        // Move to starting position (open gripper)
-        setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.starting_pos);
-        sendJointCommandForSlot(2);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
-        
-        // Move to above_plug_pos (closed gripper)
-        setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.above_plug_pos_closed);
-        sendJointCommandForSlot(2);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
-        
-        // Move to on_plug_pos (closed gripper)
-        setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.on_plug_pos);
-        sendJointCommandForSlot(2);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
-        
-        // Sync position
-        syncJointsFromFeedbackForSlot(2);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
-        
-        // Grip plug
-        setGripperStateForSlot(2, 'grip');
-        sendJointCommandForSlot(2);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.GRIPPER_DELAY_MS, sequenceId);
-        
-        // Sync position
-        syncJointsFromFeedbackForSlot(2);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
-        
-        // Send true on paper_plug topic
-        publishPaperPlugState(true);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
-        
-        // Move to above_plug_pos (with grip maintained)
-        setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.above_plug_pos_grip);
-        sendJointCommandForSlot(2);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
-        
-        // Home robot
-        homeJointsForSlot(2);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
-        
-        // Move to pluggy_pos_back (with grip)
-        setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.pluggy_pos_back);
-        sendJointCommandForSlot(2);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
-             
-        // Move to fisty_pos_back (closed gripper)
-        setJointPositionsForSlot(2, PLUG_BOT_POSITIONS.fisty_pos_back);
-        sendJointCommandForSlot(2);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
-        
-        // Send false on paper_plug topic
-        publishPaperPlugState(false);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
-        
-        // Home robot
-        homeJointsForSlot(2);
-        await waitForAutomationDelay(PLUG_BOT_TIMING.MOVEMENT_DELAY_MS, sequenceId);
+        await executePlugBotSequence(sequenceId);
 
         showNotification('Plug_Bot sequence completed successfully!', 'success');
     } catch (error) {
