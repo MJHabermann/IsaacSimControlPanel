@@ -101,6 +101,7 @@
                             <button class="btn btn-roll conveyor-state-btn" id="conveyorAllOffBtn" data-state="0">Conveyors OFF (0)</button>
                             <button class="btn btn-primary" id="autoSequenceBtn">Run Full Sequence</button>
                             <button class="btn btn-danger" id="stopAutomationBtn">Stop Automation</button>
+                            <button class="btn btn-danger" id="restartStateBtn">Publish Restart State</button>
                             <button class="btn btn-secondary" id="savePositionBtn">💾 Save Position</button>
                             <button class="btn btn-info" id="plugBotSequenceBtn">🤖 Plug_Bot Sequence</button>
                         </div>
@@ -119,6 +120,29 @@
                             <button class="btn btn-roll" id="translationRoll3" data-paper="3">Roll 3 / Paper 3</button>
                             <button class="btn btn-roll" id="translationRoll4" data-paper="4">Roll 4 / Paper 4</button>
                             <button class="btn btn-roll" id="translationRoll5" data-paper="5">Roll 5 / Paper 5</button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Camera Selection Panel -->
+                <section class="panel camera-panel">
+                    <div class="panel-header">
+                        <h2>Camera Selection</h2>
+                    </div>
+                    <div class="panel-content">
+                        <div class="camera-button-grid">
+                            <div class="camera-button-row" data-camera-topic="cam_1">
+                                <button class="btn btn-secondary camera-selection-btn" data-camera-topic="cam_1" data-camera-value="/World/POV2">Camera 1</button>
+                                <button class="btn btn-secondary camera-selection-btn" data-camera-topic="cam_1" data-camera-value="/World/POV3">Camera 2</button>
+                                <button class="btn btn-secondary camera-selection-btn" data-camera-topic="cam_1" data-camera-value="/World/PlugBot/rs013n_onrobot_rg2/rs013n_onrobot_rg2/rs013n_onrobot_rg2/rs013n_onrobot_rg2/rs013n_onrobot_rg2/link6/PlugBotCam">Plug bot cam</button>
+                                <button class="btn btn-secondary camera-selection-btn" data-camera-topic="cam_1" data-camera-value="/World/rs080n_onrobot_rg2/link3/PaperRollBot">Paper roll bot cam</button>
+                            </div>
+                            <div class="camera-button-row" data-camera-topic="cam_2">
+                                <button class="btn btn-secondary camera-selection-btn" data-camera-topic="cam_2" data-camera-value="/World/POV2">Camera 1</button>
+                                <button class="btn btn-secondary camera-selection-btn" data-camera-topic="cam_2" data-camera-value="/World/POV3">Camera 2</button>
+                                <button class="btn btn-secondary camera-selection-btn" data-camera-topic="cam_2" data-camera-value="/World/PlugBot/rs013n_onrobot_rg2/rs013n_onrobot_rg2/rs013n_onrobot_rg2/rs013n_onrobot_rg2/rs013n_onrobot_rg2/link6/PlugBotCam">Plug bot cam</button>
+                                <button class="btn btn-secondary camera-selection-btn" data-camera-topic="cam_2" data-camera-value="/World/rs080n_onrobot_rg2/link3/PaperRollBot">Paper roll bot cam</button>
+                            </div>
                         </div>
                     </div>
                 </section>

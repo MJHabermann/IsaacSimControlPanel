@@ -13,7 +13,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, String
 
 from .publishers import RobotPublisher
 from .subscribers import RobotSubscriber
@@ -64,6 +64,7 @@ class RobotManager:
         
         # Trigger publishers for Stopper groups
         self._trigger_publishers: Dict[str, Any] = {}
+        self._camera_publishers: Dict[str, Any] = {}
         
         # Initialize ROS2
         if not rclpy.ok():
@@ -76,6 +77,7 @@ class RobotManager:
         
         # Initialize trigger publishers
         self._init_trigger_publishers()
+        self._init_camera_publishers()
 
         # Initialize beam sensor subscribers
         self._init_sensor_subscribers()
@@ -132,13 +134,32 @@ class RobotManager:
             '/Conveyor/Conveyor1',
             '/Conveyor/Conveyor2',
             '/Conveyor/Conveyor3',
-            '/paper_plug/state'
+            '/paper_plug/state',
+            '/restart/state'
         ]
         
         for topic in trigger_topics:
             pub = self._node.create_publisher(Bool, topic, qos_profile)
             self._trigger_publishers[topic] = pub
             self._node.get_logger().info(f'Created trigger publisher: {topic}')
+
+    def _init_camera_publishers(self):
+        """Initialize camera selection publishers."""
+        qos_profile = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=10
+        )
+
+        camera_topics = [
+            '/camera/cam_1',
+            '/camera/cam_2'
+        ]
+
+        for topic in camera_topics:
+            pub = self._node.create_publisher(String, topic, qos_profile)
+            self._camera_publishers[topic] = pub
+            self._node.get_logger().info(f'Created camera publisher: {topic}')
 
     def _init_sensor_subscribers(self):
         """Initialize beam sensor subscriptions."""
@@ -373,6 +394,70 @@ class RobotManager:
         pub.publish(msg)
         self._node.get_logger().info(f'Published /paper_plug/state: {state}')
         
+        return True
+
+    def publish_restart_state(self, state: bool) -> bool:
+        """
+        Publish bool value to /restart/state topic.
+
+        Before publishing restart, force /paper_plug/state to False.
+
+        Args:
+            state: True or False to publish
+
+        Returns:
+            True if sent successfully
+        """
+        # Safety ordering requirement: reset plugging state before restart signal.
+        paper_plug_topic = '/paper_plug/state'
+        if paper_plug_topic not in self._trigger_publishers:
+            self._node.get_logger().error(f'Unknown trigger topic: {paper_plug_topic}')
+            return False
+
+        paper_plug_pub = self._trigger_publishers[paper_plug_topic]
+        paper_plug_msg = Bool()
+        paper_plug_msg.data = False
+        paper_plug_pub.publish(paper_plug_msg)
+        self._node.get_logger().info('Published /paper_plug/state: False (pre-restart safety)')
+
+        topic = '/restart/state'
+
+        if topic not in self._trigger_publishers:
+            self._node.get_logger().error(f'Unknown trigger topic: {topic}')
+            return False
+
+        pub = self._trigger_publishers[topic]
+        msg = Bool()
+        msg.data = state
+        pub.publish(msg)
+        self._node.get_logger().info(f'Published /restart/state: {state}')
+
+        return True
+
+    def publish_camera_selection(self, camera_topic: str, value: str) -> bool:
+        """
+        Publish a camera selection string to /camera/cam_1 or /camera/cam_2.
+
+        Args:
+            camera_topic: Either 'cam_1' or 'cam_2'
+            value: String payload to publish
+
+        Returns:
+            True if sent successfully
+        """
+        topic = f'/camera/{camera_topic}'
+        if topic not in self._camera_publishers:
+            self._node.get_logger().error(f'Unknown camera topic: {topic}')
+            return False
+
+        payload = value.strip()
+        msg = String()
+        msg.data = payload
+
+        pub = self._camera_publishers[topic]
+        pub.publish(msg)
+        self._node.get_logger().info(f'Published {topic}: {payload}')
+
         return True
     
     def add_robot(self, namespace: str, num_joints: int = 6, 

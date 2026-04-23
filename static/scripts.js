@@ -437,6 +437,23 @@ function setupEventListeners() {
         });
     }
 
+    // Restart state button
+    const restartStateBtn = document.getElementById('restartStateBtn');
+    if (restartStateBtn) {
+        restartStateBtn.addEventListener('click', () => {
+            publishRestartState(restartStateBtn);
+        });
+    }
+
+    // Camera selection buttons
+    document.querySelectorAll('.camera-selection-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const cameraTopic = btn.dataset.cameraTopic;
+            const value = btn.dataset.cameraValue;
+            publishCameraSelection(cameraTopic, value, btn);
+        });
+    });
+
     // Paper Translation buttons
     document.querySelectorAll('.translation-buttons button').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -1103,6 +1120,75 @@ function sendCutterDoorTrigger(btn) {
     }, 200);
 }
 
+// Publish True to /restart/state
+function publishRestartState(btn) {
+    if (btn) {
+        btn.disabled = true;
+        btn.classList.add('triggering');
+    }
+
+    if (state.socket && state.connected) {
+        state.socket.emit('publish_restart_state');
+        showNotification('Published restart state: true', 'success');
+    } else {
+        authFetch('/api/trigger/restart-state', {
+            method: 'POST'
+        }).then(r => r.json()).then(data => {
+            if (!data.success) {
+                showNotification('Restart state publish failed', 'error');
+            } else {
+                showNotification('Published restart state: true', 'success');
+            }
+        }).catch(() => {
+            showNotification('Restart state publish failed', 'error');
+        });
+    }
+
+    if (btn) {
+        setTimeout(() => {
+            btn.disabled = false;
+            btn.classList.remove('triggering');
+        }, 300);
+    }
+}
+
+// Publish a camera selection string to /camera/cam_1 or /camera/cam_2
+function publishCameraSelection(cameraTopic, value, btn) {
+    if (btn) {
+        btn.disabled = true;
+        btn.classList.add('triggering');
+    }
+
+    if (state.socket && state.connected) {
+        state.socket.emit('publish_camera_selection', {
+            camera_topic: cameraTopic,
+            value
+        });
+        showNotification(`Published ${cameraTopic}: ${value}`, 'success');
+    } else {
+        authFetch(`/api/camera/${cameraTopic}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ value })
+        }).then(r => r.json()).then(data => {
+            if (!data.success) {
+                showNotification('Camera selection publish failed', 'error');
+            } else {
+                showNotification(`Published ${cameraTopic}: ${value}`, 'success');
+            }
+        }).catch(() => {
+            showNotification('Camera selection publish failed', 'error');
+        });
+    }
+
+    if (btn) {
+        setTimeout(() => {
+            btn.disabled = false;
+            btn.classList.remove('triggering');
+        }, 300);
+    }
+}
+
 // Send paper translation trigger pulse
 function sendPaperTranslation(paper, btn) {
     btn.disabled = true;
@@ -1472,7 +1558,7 @@ async function runFullProductionSequence(btn) {
         sendRollHolderTrigger(rollHolderBtn);
 
         // 3) Immediately send Slot 1 to Ready to Roll during holder->wedge wait window
-        await waitForAutomationDelay(10000, sequenceId);
+        await waitForAutomationDelay(12000, sequenceId);
         readyToRollForSlot(1);
 
         // Keep roll translation command in the same window

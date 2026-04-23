@@ -156,7 +156,7 @@ body {
     display: grid;
     gap: var(--spacing-lg);
     grid-template-columns: 280px 1fr;
-    grid-template-rows: auto auto auto 1fr;
+    grid-template-rows: auto auto auto auto 1fr;
     grid-auto-flow: dense;
 }
 
@@ -232,6 +232,29 @@ body {
 
 .roll-holder-controls .btn {
     flex: 1 1 220px;
+}
+
+.camera-panel {
+    grid-column: 1 / -1;
+    grid-row: 4;
+}
+
+.camera-button-grid {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+.camera-button-row {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--spacing-md);
+}
+
+.camera-button-row .btn {
+    min-height: 52px;
+    white-space: normal;
+    text-align: center;
 }
 
 .btn-roll {
@@ -506,7 +529,7 @@ body {
 /* ============== Feedback Panel ============== */
 .feedback-panel {
     grid-column: 1 / 3;
-    grid-row: 4;
+    grid-row: 5;
 }
 
 .feedback-controls {
@@ -1291,12 +1314,18 @@ input[type="text"]::placeholder {
     grid-row: 1;
 }
 
+.display-expo .camera-panel {
+    grid-column: 1 / -1;
+    grid-row: 2;
+}
+
 .display-expo .roll-holder-controls .btn {
     display: none;
 }
 
 .display-expo #autoSequenceBtn,
-.display-expo #stopAutomationBtn {
+.display-expo #stopAutomationBtn,
+.display-expo #restartStateBtn {
     display: inline-flex;
     flex: 1 1 330px;
     min-height: 54px;
@@ -1311,6 +1340,16 @@ input[type="text"]::placeholder {
 
 .display-expo .roll-holder-controls {
     gap: calc(var(--spacing-md) * 1.5);
+}
+
+.display-expo .camera-button-row {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.display-expo .camera-button-row .btn {
+    min-height: 58px;
+    font-size: 0.95rem;
+    font-weight: 700;
 }
 
 @media (max-width: 767px) {

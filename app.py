@@ -652,6 +652,43 @@ def publish_paper_plug_state(value: int):
     })
 
 
+@app.route('/api/trigger/restart-state', methods=['POST'])
+@login_required
+def publish_restart_state():
+    """Publish true to /restart/state topic."""
+    manager = get_manager()
+    success = manager.publish_restart_state(True)
+
+    return jsonify({
+        'success': success,
+        'action': 'restart_state',
+        'value': True
+    })
+
+
+@app.route('/api/camera/<camera_topic>', methods=['POST'])
+@login_required
+def publish_camera_selection(camera_topic: str):
+    """Publish a camera selection string to /camera/cam_1 or /camera/cam_2."""
+    if camera_topic not in ['cam_1', 'cam_2']:
+        return jsonify({'success': False, 'error': 'Camera topic must be cam_1 or cam_2'}), 400
+
+    data = request.get_json(silent=True) or {}
+    value = data.get('value', '')
+    if not isinstance(value, str) or not value.strip():
+        return jsonify({'success': False, 'error': 'String value required'}), 400
+
+    manager = get_manager()
+    success = manager.publish_camera_selection(camera_topic, value)
+
+    return jsonify({
+        'success': success,
+        'action': 'camera_selection',
+        'camera_topic': camera_topic,
+        'value': value.strip()
+    })
+
+
 # ============== WebSocket Events ==============
 
 @socketio.on('connect')
@@ -930,6 +967,48 @@ def handle_paper_plug_state(data):
         'success': success,
         'action': 'paper_plug_state',
         'value': value == 1
+    })
+
+
+@socketio.on('publish_restart_state')
+@authenticated_only
+def handle_restart_state():
+    """Handle restart state command via WebSocket (always publishes True)."""
+    manager = get_manager()
+    success = manager.publish_restart_state(True)
+
+    emit('command_result', {
+        'type': 'restart_state',
+        'success': success,
+        'action': 'restart_state',
+        'value': True
+    })
+
+
+@socketio.on('publish_camera_selection')
+@authenticated_only
+def handle_camera_selection(data):
+    """Handle camera selection command via WebSocket."""
+    camera_topic = data.get('camera_topic')
+    value = data.get('value', '')
+
+    if camera_topic not in ['cam_1', 'cam_2'] or not isinstance(value, str) or not value.strip():
+        emit('command_result', {
+            'type': 'camera_selection',
+            'success': False,
+            'error': 'Invalid camera selection'
+        })
+        return
+
+    manager = get_manager()
+    success = manager.publish_camera_selection(camera_topic, value)
+
+    emit('command_result', {
+        'type': 'camera_selection',
+        'success': success,
+        'action': 'camera_selection',
+        'camera_topic': camera_topic,
+        'value': value.strip()
     })
 
 
