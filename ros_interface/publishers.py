@@ -10,7 +10,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import JointState
-from example_interfaces.msg import Float64MultiArray
+from std_msgs.msg import Float64MultiArray
 from std_msgs.msg import Header
 
 

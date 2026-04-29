@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Isaac Sim HMI Dashboard</title>
+    <title>Isaac Sim HMI — University of Idaho</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
     <!-- Socket.IO -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
@@ -13,7 +13,10 @@
         <!-- Header -->
         <header class="header">
             <div class="header-content">
-                <h1> Isaac Sim HMI Dashboard</h1>
+                <div class="header-brand">
+                    <h1>Isaac Sim HMI Dashboard</h1>
+                    <span class="header-subtitle">University of Idaho &nbsp;&bull;&nbsp; Vandal Robotics</span>
+                </div>
                 <div class="header-right">
                     <div class="connection-status" id="connectionStatus">
                         <span class="status-dot disconnected"></span>
@@ -249,7 +252,14 @@
                 <section class="panel cartesian-control-panel" data-slot="1">
                     <div class="panel-header">
                         <h2>Cartesian Control - Slot 1</h2>
-                        <span class="selected-robot robot-slot-1-cart">No robot assigned</span>
+                        <div style="display:flex;align-items:center;gap:var(--spacing-md);">
+                            <label class="toggle-switch toggle-cartesian" title="Show/hide Cartesian controls">
+                                <input type="checkbox" class="cartesian-toggle-input" data-slot="1" checked />
+                                <span class="slider"></span>
+                                <span class="toggle-label">Cartesian</span>
+                            </label>
+                            <span class="selected-robot robot-slot-1-cart">No robot assigned</span>
+                        </div>
                     </div>
                     <div class="panel-content">
                         <div class="cartesian-inputs" data-slot="1">
@@ -426,7 +436,14 @@
                 <section class="panel cartesian-control-panel" data-slot="2">
                     <div class="panel-header">
                         <h2>Cartesian Control - Slot 2</h2>
-                        <span class="selected-robot robot-slot-2-cart">No robot assigned</span>
+                        <div style="display:flex;align-items:center;gap:var(--spacing-md);">
+                            <label class="toggle-switch toggle-cartesian" title="Show/hide Cartesian controls">
+                                <input type="checkbox" class="cartesian-toggle-input" data-slot="2" checked />
+                                <span class="slider"></span>
+                                <span class="toggle-label">Cartesian</span>
+                            </label>
+                            <span class="selected-robot robot-slot-2-cart">No robot assigned</span>
+                        </div>
                     </div>
                     <div class="panel-content">
                         <div class="cartesian-inputs" data-slot="2">
@@ -596,7 +613,7 @@
 
         <!-- Footer -->
         <footer class="footer">
-            <p>Isaac Sim HMI Dashboard | ROS2 Interface</p>
+            <p><span>University of Idaho</span> &nbsp;&bull;&nbsp; Isaac Sim HMI &nbsp;&bull;&nbsp; ROS2 Interface</p>
         </footer>
     </div>
 

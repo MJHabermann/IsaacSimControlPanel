@@ -34,10 +34,7 @@ class Config:
     PORT = int(os.environ.get('FLASK_PORT', 5000))
     
     # Predefined robot namespaces (can be overridden by environment variable)
-    PREDEFINED_ROBOTS = os.environ.get(
-        'PREDEFINED_ROBOTS', 
-        'robot1,robot2'
-    ).split(',')
+    PREDEFINED_ROBOTS = [r for r in os.environ.get('PREDEFINED_ROBOTS', '').split(',') if r]
     
     # WebSocket settings
     SOCKETIO_ASYNC_MODE = 'threading'

@@ -12,7 +12,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import JointState
-from example_interfaces.msg import Float64MultiArray
+from std_msgs.msg import Float64MultiArray
 
 
 @dataclass
@@ -105,12 +105,12 @@ class RobotSubscriber:
             self._state.joint_timestamp = datetime.now()
         
         # Notify callbacks
-        for callback in self._callbacks:
+        for callback in list(self._callbacks):
             try:
                 callback('joint_states', self.get_state())
             except Exception as e:
                 self.node.get_logger().error(f'Callback error: {e}')
-    
+
     def _cartesian_pose_callback(self, msg: Float64MultiArray):
         """Handle incoming Cartesian pose messages as Float64MultiArray
         Format: [x, y, z, w, qx, qy, qz]
@@ -137,7 +137,7 @@ class RobotSubscriber:
             self._state.cartesian_timestamp = datetime.now()
         
         # Notify callbacks
-        for callback in self._callbacks:
+        for callback in list(self._callbacks):
             try:
                 callback('cartesian_pose', self.get_state())
             except Exception as e:

@@ -48,25 +48,28 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-# Setup virtual environment
+# Locate Python — find first venv whose Python can actually import Flask
 VENV_DIR="$SCRIPT_DIR/.venv"
-if [ ! -d "$VENV_DIR" ]; then
-    echo -e "${YELLOW}Creating virtual environment...${NC}"
-    python3 -m venv "$VENV_DIR" --system-site-packages
+FALLBACK_VENV="/home/isaacsim/Desktop/IsaacSimControlPanel/.venv"
+PYTHON=""
+
+for candidate in "$VENV_DIR/bin/python3" "$FALLBACK_VENV/bin/python3"; do
+    if [ -x "$candidate" ] && "$candidate" -c "import flask, flask_login" 2>/dev/null; then
+        PYTHON="$candidate"
+        echo -e "${GREEN}Using Python: $PYTHON${NC}"
+        break
+    fi
+done
+
+if [ -z "$PYTHON" ]; then
+    echo -e "${RED}ERROR: Could not find a Python with Flask installed.${NC}"
+    echo "Checked: $VENV_DIR/bin/python3"
+    echo "         $FALLBACK_VENV/bin/python3"
+    exit 1
 fi
 
-# Activate virtual environment
-source "$VENV_DIR/bin/activate"
-echo -e "${GREEN}Using virtual environment: $VENV_DIR${NC}"
-
-# Check for Flask and install requirements if needed
-if ! python3 -c "import flask; import flask_login" 2>/dev/null; then
-    echo -e "${YELLOW}Installing requirements...${NC}"
-    pip install -r "$SCRIPT_DIR/requirements.txt"
-fi
-
-# Check for rclpy
-if ! python3 -c "import rclpy" 2>/dev/null; then
+# Check for rclpy (provided by ROS2, not the venv)
+if ! "$PYTHON" -c "import rclpy" 2>/dev/null; then
     echo -e "${RED}ERROR: rclpy not found. Make sure ROS2 Python packages are installed.${NC}"
     exit 1
 fi
@@ -74,7 +77,7 @@ fi
 # Default configuration
 export FLASK_HOST="${FLASK_HOST:-0.0.0.0}"
 export FLASK_PORT="${FLASK_PORT:-5000}"
-export PREDEFINED_ROBOTS="${PREDEFINED_ROBOTS:-robot1,robot2}"
+export PREDEFINED_ROBOTS="${PREDEFINED_ROBOTS:-}"
 
 echo ""
 echo "Configuration:"
@@ -89,4 +92,4 @@ echo ""
 # Run the Flask app
 cd "$SCRIPT_DIR"
 export HMI_ADMIN_PASSWORD_HASH='scrypt:32768:8:1$yOsIi8xzpcxajNL4$32a6fe37acd1aee36212bd6083d22703f4d54bbac1b0526eba7fc8414cbc2a27914087f6edf772f5b564c4cab4ae20128c4e2345e1b67e770edefe4e346f5049'
-python3 app.py
+"$PYTHON" app.py

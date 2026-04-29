@@ -267,6 +267,19 @@ function setupEventListeners() {
         });
     });
 
+    // Cartesian panel collapse toggles
+    document.querySelectorAll('.cartesian-toggle-input').forEach(input => {
+        input.addEventListener('change', () => {
+            const slot = input.dataset.slot;
+            const panel = document.querySelector(`.cartesian-control-panel[data-slot="${slot}"]`);
+            if (input.checked) {
+                panel.classList.remove('collapsed');
+            } else {
+                panel.classList.add('collapsed');
+            }
+        });
+    });
+
     // Joint control - Slot-aware button listeners
     document.querySelectorAll('.sendJointCmd').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -543,22 +556,22 @@ async function scanForRobots() {
     try {
         console.log('[Scan] Starting robot scan...');
         const response = await authFetch('/api/robots/scan', { method: 'POST' });
-        
+
         console.log(`[Scan] Response status: ${response.status}`);
-        
+
         if (!response.ok) {
             const errorText = await response.text();
             console.error(`[Scan] HTTP ${response.status}: ${errorText}`);
             showNotification(`Failed to scan: HTTP ${response.status}`, 'error');
             return;
         }
-        
+
         const data = await response.json();
         console.log('[Scan] Response data:', data);
-        
+
         if (data.success && data.discovered && data.discovered.length > 0) {
             showNotification(`Found ${data.discovered.length} robot(s)`, 'success');
-            
+
             // Add discovered robots
             for (const namespace of data.discovered) {
                 console.log(`[Scan] Adding discovered robot: ${namespace}`);
