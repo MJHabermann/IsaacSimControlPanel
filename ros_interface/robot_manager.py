@@ -55,6 +55,7 @@ class RobotManager:
         self._executor: Optional[MultiThreadedExecutor] = None
         self._node: Optional[RobotManagerNode] = None
         self._state_callbacks: List[Callable] = []
+        self._sensor_callbacks: List[Callable] = []
         self._command_queue = queue.Queue()
         self._sensor_states: Dict[str, bool] = {
             'beam_1': False,
@@ -187,8 +188,18 @@ class RobotManager:
     def _make_sensor_callback(self, sensor_name: str):
         """Create a callback for a named sensor."""
         def callback(msg: Bool):
+            changed = False
             with self._lock:
-                self._sensor_states[sensor_name] = bool(msg.data)
+                new_state = bool(msg.data)
+                changed = self._sensor_states.get(sensor_name) != new_state
+                self._sensor_states[sensor_name] = new_state
+
+            if changed:
+                for sensor_callback in list(self._sensor_callbacks):
+                    try:
+                        sensor_callback(sensor_name, new_state)
+                    except Exception as e:
+                        self._node.get_logger().error(f'Sensor callback error: {e}')
         return callback
 
     def get_sensor_state(self, sensor_name: str) -> Optional[bool]:
@@ -202,6 +213,16 @@ class RobotManager:
         """Get snapshot of all known sensor states."""
         with self._lock:
             return dict(self._sensor_states)
+
+    def add_sensor_callback(self, callback: Callable):
+        """Add a callback for beam sensor updates."""
+        if callback not in self._sensor_callbacks:
+            self._sensor_callbacks.append(callback)
+
+    def remove_sensor_callback(self, callback: Callable):
+        """Remove a beam sensor callback."""
+        if callback in self._sensor_callbacks:
+            self._sensor_callbacks.remove(callback)
     
     def send_trigger(self, group: int) -> bool:
         """

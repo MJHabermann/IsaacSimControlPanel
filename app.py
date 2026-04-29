@@ -49,9 +49,10 @@ class Config:
     # Authentication credentials (set via environment variables!)
     # Default admin password is 'changeme' - CHANGE THIS IN PRODUCTION
     ADMIN_USERNAME = os.environ.get('HMI_ADMIN_USER', 'admin')
+    # Pre-computed hash for 'changeme' to ensure consistency across app restarts
     ADMIN_PASSWORD_HASH = os.environ.get(
         'HMI_ADMIN_PASSWORD_HASH',
-        generate_password_hash('changeme')  # Default password - CHANGE THIS!
+        'scrypt:32768:8:1$vMi5OnnWK66dk2Gr$ed455828d14273dfd636e3151b6cf7b4002b908290b51d1104841b74a1f8977c8dee0c3786490c09e8e7eee9cbff25b28ffead06c3f1da8a17e56f13e02b07b1'
     )
     
     # Session settings
@@ -166,6 +167,7 @@ def get_manager() -> RobotManager:
         
         # Add WebSocket callback for state streaming
         robot_manager.add_state_callback(on_robot_state_update)
+        robot_manager.add_sensor_callback(on_sensor_state_update)
     
     return robot_manager
 
@@ -177,6 +179,18 @@ def on_robot_state_update(namespace: str, topic: str, state: Dict):
         'topic': topic,
         'state': state
     })
+
+
+def on_sensor_state_update(sensor_name: str, state: bool):
+    """Callback for beam sensor updates - broadcasts and stops conveyors immediately."""
+    socketio.emit('sensor_state', {
+        'sensor': sensor_name,
+        'state': state
+    })
+
+    if sensor_name in ['beam_1', 'beam_2'] and state:
+        manager = get_manager()
+        manager.set_conveyor_all_state(False)
 
 
 # ============== Authentication Routes ==============

@@ -7,7 +7,7 @@
 const CONFIG = {
     POLLING_INTERVAL: 100,  // ms for fallback polling
     RECONNECT_DELAY: 3000,   // ms before reconnection attempt
-    NOTIFICATION_DURATION: 3000,  // ms to show notifications
+    NOTIFICATION_DURATION: 1200,  // ms to show notifications (shorter for fewer popups)
     DECIMAL_PLACES: 4,
     JOINT_OFFSET_STEP: 0.1,  // radians
     POSITION_OFFSET_STEP: 0.01,  // meters
@@ -132,6 +132,7 @@ const state = {
     selectedRobot: null,
     robots: [],
     robotStates: {},
+    sensorStates: { beam_1: null, beam_2: null },
     robotConfigs: {},  // Track number of joints per robot: { 'Plug_Bot': 12, 'robot1': 6, ... }
     robotSlots: { 1: null, 2: null },  // Track which robot is assigned to each slot (1 and 2)
     selectedSlotOrder: [],  // Track the order in which slots were selected [1st selected robot, 2nd selected robot]
@@ -223,6 +224,10 @@ function initializeWebSocket() {
         if (state.autoRefresh) {
             handleRobotStateUpdate(data);
         }
+    });
+
+    state.socket.on('sensor_state', (data) => {
+        handleSensorStateUpdate(data);
     });
 
     state.socket.on('command_result', (data) => {
@@ -839,6 +844,14 @@ function handleRobotStateUpdate(data) {
     }
 }
 
+function handleSensorStateUpdate(data) {
+    const { sensor, state: sensorState } = data;
+
+    if (sensor && Object.prototype.hasOwnProperty.call(state.sensorStates, sensor)) {
+        state.sensorStates[sensor] = sensorState;
+    }
+}
+
 function updateFeedbackDisplay(robotState) {
     // Update joint states table
     const jointStates = robotState.joint_states;
@@ -1303,8 +1316,12 @@ async function waitForAutomationDelay(ms, sequenceId) {
     }
 }
 
-async function waitForSensorState(sensorName, expectedState, sequenceId, timeoutMs = 90000, pollIntervalMs = 200) {
+async function waitForSensorState(sensorName, expectedState, sequenceId, timeoutMs = 90000, pollIntervalMs = 50) {
     const startedAt = Date.now();
+
+    if (state.sensorStates[sensorName] === expectedState) {
+        return;
+    }
 
     while (Date.now() - startedAt < timeoutMs) {
         if (automationState.stopRequested || automationState.sequenceId !== sequenceId) {
@@ -1316,6 +1333,7 @@ async function waitForSensorState(sensorName, expectedState, sequenceId, timeout
             const data = await response.json();
 
             if (data.success && data.state === expectedState) {
+                state.sensorStates[sensorName] = data.state;
                 return;
             }
         } catch (error) {
@@ -2206,27 +2224,37 @@ function formatNumber(value) {
 
 function showNotification(message, type = 'info') {
     const container = document.getElementById('notifications');
-    
+    if (!container) return;
+
+    // Limit visible notifications to a maximum number
+    const MAX_NOTIFICATIONS = 3;
+    while (container.children.length >= MAX_NOTIFICATIONS) {
+        // remove the oldest notification immediately
+        const oldest = container.firstElementChild;
+        if (oldest) oldest.remove();
+    }
+
     const notification = document.createElement('div');
     notification.className = `notification notification-${type}`;
     notification.innerHTML = `
         <span class="notification-message">${message}</span>
         <button class="notification-close">×</button>
     `;
-    
+
     notification.querySelector('.notification-close').addEventListener('click', () => {
         notification.remove();
     });
-    
+
     container.appendChild(notification);
-    
-    // Auto-remove after duration
+
+    // Auto-remove after (shortened) duration
+    const duration = CONFIG.NOTIFICATION_DURATION || 1200;
     setTimeout(() => {
         if (notification.parentNode) {
             notification.classList.add('fade-out');
-            setTimeout(() => notification.remove(), 300);
+            setTimeout(() => notification.remove(), 200);
         }
-    }, CONFIG.NOTIFICATION_DURATION);
+    }, duration);
 }
 
 function startUpdateRateMonitor() {
